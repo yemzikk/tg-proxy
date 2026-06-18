@@ -1,0 +1,13 @@
+name = "tg-proxy"
+pages_build_output_dir = "public"
+compatibility_date = "2026-06-18"
+
+# Live stats binding (optional). The proxy works without it; the stats panel
+# simply stays hidden. `./setup.sh` provisions this for you.
+# Forking? Replace database_id with your own from
+#   npx wrangler d1 create tg-proxy-stats
+# then run `npm run db:init`. The id is an account-scoped identifier, not a secret.
+[[d1_databases]]
+binding = "tg_proxy_stats"
+database_name = "tg-proxy-stats"
+database_id = "f45cdeb0-60bb-43f4-9227-d0844f7caee0"

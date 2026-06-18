@@ -1,0 +1,11 @@
+# Copy to `.dev.vars` and fill in for local dev. All values are optional.
+
+# Channel logging: when both are set, every send* call is mirrored to this
+# Telegram channel. Leave unset to run the proxy without logging.
+LOG_BOT_TOKEN=
+LOG_CHANNEL_ID=
+
+# Access control: comma-separated bot ids (the number before ":" in a token),
+# e.g. ALLOWED_BOT_IDS=123456789,987654321
+# When set, the proxy only serves those bots. Leave unset for an open relay.
+ALLOWED_BOT_IDS=

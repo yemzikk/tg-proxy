@@ -1,0 +1,18 @@
+{
+  "name": "tg-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cloudflare Pages proxy for the Telegram Bot API",
+  "scripts": {
+    "setup": "bash setup.sh",
+    "dev": "wrangler pages dev",
+    "deploy": "wrangler pages deploy",
+    "logs": "wrangler pages deployment tail",
+    "errors": "wrangler d1 execute tg-proxy-stats --remote --command \"SELECT id, ts, kind, status, path, message FROM error_log ORDER BY id DESC LIMIT 50\"",
+    "db:init": "wrangler d1 execute tg-proxy-stats --remote --file=./schema.sql",
+    "db:init:local": "wrangler d1 execute tg-proxy-stats --local --file=./schema.sql"
+  },
+  "devDependencies": {
+    "wrangler": "^4"
+  }
+}
