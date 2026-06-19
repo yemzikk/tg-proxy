@@ -67,6 +67,10 @@ export async function onRequest(context) {
   // log. Resolve it once, up front, so it is available on every path below.
   const statsDb = env.tg_proxy_stats || env.DB;
 
+  // Parse the bot id and method out of the path once, with the secret token
+  // redacted. Error-log rows reuse this so the full token is never stored.
+  const pathInfo = parseRequestPath(url.pathname);
+
   // Rebuild the request against the Telegram origin, preserving path, query,
   // method, headers and body. new Request(url, request) copies all of those,
   // and fetch() recomputes the Host header from the new URL automatically.
@@ -81,7 +85,16 @@ export async function onRequest(context) {
     // live logs and the durable error log (neither of which depend on Telegram),
     // bump the errors counter, then return a clean 502 rather than crashing.
     console.error("proxy: upstream fetch failed", url.pathname, err && err.message);
-    waitUntil(logError(statsDb, "upstream_unreachable", { status: 502, path: url.pathname, message: err && err.message }));
+    waitUntil(
+      logError(statsDb, "upstream_unreachable", {
+        status: 502,
+        method: pathInfo.method,
+        botId: pathInfo.botId,
+        path: pathInfo.redactedPath,
+        message: err && err.message,
+        ...callerFields(request),
+      })
+    );
     if (statsDb && logTarget) {
       waitUntil(
         recordStat(statsDb, false).catch((e) => {
@@ -109,14 +122,19 @@ export async function onRequest(context) {
         // A logging failure must never affect the proxied request. Record it in
         // Cloudflare's logs and the durable error log, not the channel itself.
         console.error("proxy: log delivery failed", err && err.message);
-        return logError(statsDb, "log_delivery_failed", { path: url.pathname, message: err && err.message });
+        return logError(statsDb, "log_delivery_failed", {
+          method: pathInfo.method,
+          botId: pathInfo.botId,
+          path: pathInfo.redactedPath,
+          message: err && err.message,
+        });
       })
     );
   }
 
   // Count send* outcomes for the public /stats endpoint. Optional: needs the
   // D1 binding. Runs in the background so it never delays the response. Getting
-  // ANY response back means the proxy did its job, so it counts as delivered —
+  // ANY response back means the proxy did its job, so it counts as delivered,
   // even if Telegram itself replied 4xx/5xx (bad chat_id, blocked, rate limit).
   // Those are between the bot and Telegram, not proxy failures.
   if (statsDb && logTarget) {
@@ -125,6 +143,29 @@ export async function onRequest(context) {
         console.error("proxy: stat write failed", err && err.message);
         return logError(statsDb, "stat_write_failed", { message: err && err.message });
       })
+    );
+  }
+
+  // Telegram replied, but with an error (4xx/5xx). Not a proxy failure, so it is
+  // not counted in /stats, but the error_code/description says exactly what went
+  // wrong, so record it for diagnosis. Read the body from a clone so the response
+  // streamed back to the client is left untouched.
+  if (statsDb && !upstream.ok) {
+    const errorClone = upstream.clone();
+    waitUntil(
+      readTelegramError(errorClone)
+        .then((tg) =>
+          logError(statsDb, "telegram_error", {
+            status: upstream.status,
+            method: pathInfo.method,
+            botId: pathInfo.botId,
+            path: pathInfo.redactedPath,
+            errorCode: tg.errorCode,
+            description: tg.description,
+            ...callerFields(request),
+          })
+        )
+        .catch((err) => console.error("proxy: telegram-error log failed", err && err.message))
     );
   }
 
@@ -206,16 +247,94 @@ async function recordStat(db, delivered) {
 // Append a row to the durable error log in D1. Self-guarded and best-effort: if
 // the binding or table is missing, it falls back to console.error so a logging
 // failure can never throw into the request path. Review with `npm run errors`.
+// All columns are optional; only `kind` is required. The full bot token is never
+// passed here (callers send the redacted path and numeric bot id instead).
 async function logError(db, kind, fields) {
   if (!db) return;
   fields = fields || {};
   try {
     await db
-      .prepare("INSERT INTO error_log (ts, kind, status, path, message) VALUES (?, ?, ?, ?, ?)")
-      .bind(new Date().toISOString(), kind, fields.status ?? null, fields.path ?? null, fields.message ?? null)
+      .prepare(
+        `INSERT INTO error_log
+           (ts, kind, status, method, bot_id, path, error_code, description, message,
+            ip, country, region, city, asn, org, ua, colo, ray)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        new Date().toISOString(),
+        kind,
+        fields.status ?? null,
+        fields.method ?? null,
+        fields.botId ?? null,
+        fields.path ?? null,
+        fields.errorCode ?? null,
+        fields.description ?? null,
+        fields.message ?? null,
+        fields.ip ?? null,
+        fields.country ?? null,
+        fields.region ?? null,
+        fields.city ?? null,
+        fields.asn ?? null,
+        fields.org ?? null,
+        fields.ua ?? null,
+        fields.colo ?? null,
+        fields.ray ?? null
+      )
       .run();
   } catch (e) {
     console.error("proxy: error-log write failed", e && e.message);
+  }
+}
+
+// Parse the bot id and method out of a proxy path, with the secret token
+// redacted so it never reaches the error log. Handles both /bot<token>/<method>
+// and /file/bot<token>/<method>. Returns nulls for non-matching paths.
+function parseRequestPath(pathname) {
+  const match = pathname.match(/^\/(?:file\/)?bot([^/]+)(?:\/(\w+))?/);
+  if (!match) return { botId: null, method: null, redactedPath: pathname };
+  const [, token, method] = match;
+  const botId = token.split(":")[0];
+  // Replace the full token with just the numeric id, keeping the rest of the path.
+  const redactedPath = pathname.replace("bot" + token, "bot" + botId);
+  return { botId, method: method || null, redactedPath };
+}
+
+// Pull the caller's network/geo snapshot from request.cf and the CF-* headers,
+// shaped to the error_log columns. Reads no body, so it is safe on any path.
+function callerFields(request) {
+  const cf = request.cf || {};
+  const h = request.headers;
+  return {
+    ip: h.get("cf-connecting-ip") || h.get("x-forwarded-for") || null,
+    country: cf.country || null,
+    region: cf.region || null,
+    city: cf.city || null,
+    asn: cf.asn != null ? String(cf.asn) : null,
+    org: cf.asOrganization || null,
+    ua: h.get("user-agent") || null,
+    colo: cf.colo || null,
+    ray: h.get("cf-ray") || null,
+  };
+}
+
+// Read Telegram's error response to extract { errorCode, description }. The body
+// is normally small JSON like {"ok":false,"error_code":400,"description":"..."}.
+// Falls back to a truncated raw snippet if the body is not JSON (e.g. an edge
+// error page), and to nulls if it cannot be read at all. Never throws.
+async function readTelegramError(response) {
+  try {
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text);
+      return {
+        errorCode: typeof data.error_code === "number" ? data.error_code : null,
+        description: data.description ?? null,
+      };
+    } catch {
+      return { errorCode: null, description: text ? text.slice(0, 500) : null };
+    }
+  } catch {
+    return { errorCode: null, description: null };
   }
 }
 

@@ -149,8 +149,10 @@ Read the [privacy notice](#privacy-notice-for-logging) before enabling it.
 
 ## Logs and errors
 
-Operational failures (an unreachable upstream, a failed log delivery, a failed
-stats write) are handled in two layers, neither of which depends on Telegram.
+Two kinds of failure are recorded: proxy failures (an unreachable upstream, a
+failed log delivery, a failed stats write) and Telegram's own rejections (any
+`4xx`/`5xx` it replies with). Both are handled in two layers, neither of which
+depends on Telegram.
 
 **1. Live logs.** Each failure is written with `console.error`. Stream it with:
 
@@ -168,11 +170,22 @@ also appended to an `error_log` table in the stats database, so you can review
 them after the fact:
 
 ```sh
-npm run errors   # last 50 rows: time, kind, status, path, message
+npm run errors   # last 50 rows: time, kind, status, method, bot id, error_code, description, ip, country
 ```
 
-This needs the D1 binding and table. If you set up stats before this was added,
-re-run `npm run db:init` once to create `error_log`.
+Each row carries enough to reproduce the failure: the `kind`, HTTP `status`, the
+Telegram `method` and numeric `bot_id`, Telegram's own `error_code` and
+`description` (for `telegram_error` rows), the proxy-side `message` (for
+`upstream_unreachable`), and the caller's IP, geo, ASN and user-agent. The bot
+token is never stored: only the numeric bot id, and `path` has the token redacted.
+
+This needs the D1 binding and table. If you set up stats before this column set
+existed, recreate the table once (it carries no data you need to keep):
+
+```sh
+npx wrangler d1 execute tg-proxy-stats --remote --command "DROP TABLE IF EXISTS error_log"
+npm run db:init   # recreates error_log (and leaves the stats row untouched)
+```
 
 If the upstream is unreachable, the proxy returns a clean `502` instead of
 crashing. The optional [channel logging](#channel-logging) is best-effort message
