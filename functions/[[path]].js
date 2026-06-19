@@ -76,10 +76,20 @@ export async function onRequest(context) {
     upstream = await fetch(new Request(upstreamUrl, request));
   } catch (err) {
     // The upstream is unreachable (often the very reason this proxy exists).
-    // Record it both in Cloudflare's live logs and the durable error log (which
-    // do NOT depend on Telegram), then return a clean 502 rather than crashing.
+    // This is the only failure mode the proxy is actually responsible for, so it
+    // is the only thing counted as an error in /stats. Record it in Cloudflare's
+    // live logs and the durable error log (neither of which depend on Telegram),
+    // bump the errors counter, then return a clean 502 rather than crashing.
     console.error("proxy: upstream fetch failed", url.pathname, err && err.message);
     waitUntil(logError(statsDb, "upstream_unreachable", { status: 502, path: url.pathname, message: err && err.message }));
+    if (statsDb && logTarget) {
+      waitUntil(
+        recordStat(statsDb, false).catch((e) => {
+          console.error("proxy: stat write failed", e && e.message);
+          return logError(statsDb, "stat_write_failed", { message: e && e.message });
+        })
+      );
+    }
     return new Response(
       JSON.stringify({
         ok: false,
@@ -105,10 +115,13 @@ export async function onRequest(context) {
   }
 
   // Count send* outcomes for the public /stats endpoint. Optional: needs the
-  // D1 binding. Runs in the background so it never delays the response.
+  // D1 binding. Runs in the background so it never delays the response. Getting
+  // ANY response back means the proxy did its job, so it counts as delivered —
+  // even if Telegram itself replied 4xx/5xx (bad chat_id, blocked, rate limit).
+  // Those are between the bot and Telegram, not proxy failures.
   if (statsDb && logTarget) {
     waitUntil(
-      recordStat(statsDb, upstream.ok).catch((err) => {
+      recordStat(statsDb, true).catch((err) => {
         console.error("proxy: stat write failed", err && err.message);
         return logError(statsDb, "stat_write_failed", { message: err && err.message });
       })
@@ -178,13 +191,15 @@ async function logMessage(request, url, target, meta, env) {
 }
 
 // Atomically bump the delivered/errors counters in D1. A single UPDATE keeps
-// it race-free even under concurrent requests.
-async function recordStat(db, ok) {
+// it race-free even under concurrent requests. `delivered` is true when the
+// proxy successfully relayed the request and got a response from Telegram
+// (whatever its HTTP status); false only when api.telegram.org was unreachable.
+async function recordStat(db, delivered) {
   await db
     .prepare(
       "UPDATE stats SET delivered = delivered + ?, errors = errors + ? WHERE id = 1"
     )
-    .bind(ok ? 1 : 0, ok ? 0 : 1)
+    .bind(delivered ? 1 : 0, delivered ? 0 : 1)
     .run();
 }
 

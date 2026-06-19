@@ -105,9 +105,14 @@ npm run db:init:local                    # (optional) same for local dev
 npm run deploy                           # 4. redeploy
 ```
 
-Each `send*` call records one outcome: an upstream `2xx` counts as delivered,
-anything else as an error. Counts are bumped with a single atomic `UPDATE`, so
-they stay correct under concurrency, and are served publicly at `/stats`.
+Each `send*` call records one outcome from the proxy's point of view: any call
+the proxy successfully relayed to Telegram counts as delivered, regardless of
+Telegram's own HTTP status. A `4xx`/`5xx` from Telegram (bad `chat_id`, bot
+blocked, rate limit) is between your bot and Telegram, not a proxy failure, so it
+still counts as delivered. Only a call where `api.telegram.org` was unreachable
+counts as an error, the same event recorded in `error_log`. Counts are bumped
+with a single atomic `UPDATE`, so they stay correct under concurrency, and are
+served publicly at `/stats`.
 
 > If the proxy is open (no `ALLOWED_BOT_IDS`), anyone can call it with a junk
 > token and inflate these counters. Treat the public stats as a rough activity
