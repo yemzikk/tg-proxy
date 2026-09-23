@@ -195,7 +195,8 @@ async function logMessage(request, url, target, meta, env) {
   const { botToken, method } = target;
   const params = await extractParams(request, url);
   const chatId = params.chat_id;
-  const text = params.text ?? params.caption;
+  const media = describeMedia(method, params);
+  const text = params.text ?? params.caption ?? media.captions.join("\n\n");
 
   // Avoid an infinite loop if the log bot itself posts to the log channel.
   if (
@@ -210,11 +211,12 @@ async function logMessage(request, url, target, meta, env) {
   if (chatId != null) header += ` → <code>${escapeHtml(String(chatId))}</code>`;
 
   const lines = [header];
+  if (media.summary) lines.push(media.summary);
   if (text) {
     let body = String(text);
     if (body.length > 3500) body = body.slice(0, 3500) + "…";
     lines.push("", escapeHtml(body));
-  } else {
+  } else if (!media.summary) {
     lines.push("", "<i>(no text — media or non-text payload)</i>");
   }
   lines.push(...requestDetailLines(meta));
@@ -439,8 +441,94 @@ function requestDetailLines(meta) {
   return lines;
 }
 
-// Collect call parameters from the query string and a text-based body.
-// multipart/form-data (media uploads) is intentionally not buffered.
+// Media fields a single-media send* call can carry, in the order we check them.
+const MEDIA_FIELDS = [
+  "photo", "video", "animation", "audio", "document", "voice", "video_note", "sticker",
+];
+
+// Summarise the media/non-text part of a send* call. Returns { summary, captions }
+// where summary is a ready-to-push Telegram-HTML line (or null) and captions are
+// any captions nested inside the payload (sendMediaGroup keeps them per item).
+function describeMedia(method, params) {
+  const captions = [];
+
+  if (method === "sendMediaGroup") {
+    let items = params.media;
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        items = null;
+      }
+    }
+    if (!Array.isArray(items)) return { summary: "🖼 media group", captions };
+    const kinds = [];
+    for (const item of items) {
+      if (!item || typeof item !== "object") continue;
+      kinds.push(`${item.type || "media"} (${mediaSource(item.media, params)})`);
+      if (item.caption) captions.push(String(item.caption));
+    }
+    const summary = `🖼 ${items.length} item${items.length === 1 ? "" : "s"}: ${escapeHtml(kinds.join(", "))}`;
+    return { summary, captions };
+  }
+
+  for (const field of MEDIA_FIELDS) {
+    if (params[field] != null) {
+      return { summary: `🖼 ${field} (${escapeHtml(mediaSource(params[field], params))})`, captions };
+    }
+  }
+
+  if (method === "sendLocation" || method === "sendVenue") {
+    if (params.latitude != null && params.longitude != null) {
+      const title = params.title ? ` · ${escapeHtml(params.title)}` : "";
+      return {
+        summary: `📍 <code>${escapeHtml(params.latitude)}, ${escapeHtml(params.longitude)}</code>${title}`,
+        captions,
+      };
+    }
+  }
+  if (method === "sendPoll" && params.question) {
+    return { summary: `📊 poll: ${escapeHtml(params.question)}`, captions };
+  }
+  if (method === "sendContact" && params.phone_number) {
+    const name = [params.first_name, params.last_name].filter(Boolean).join(" ");
+    return { summary: `👤 contact: ${escapeHtml(name)} <code>${escapeHtml(params.phone_number)}</code>`, captions };
+  }
+  if (method === "sendChatAction" && params.action) {
+    return { summary: `⌨️ chat action: ${escapeHtml(params.action)}`, captions };
+  }
+  if (method === "sendDice") {
+    return { summary: `🎲 dice ${escapeHtml(params.emoji || "🎲")}`, captions };
+  }
+  return { summary: null, captions };
+}
+
+// Describe where a media value comes from: an upload, a URL or a file_id.
+function mediaSource(value, params) {
+  if (value && typeof value === "object" && value.upload) return describeUpload(value);
+  if (typeof value !== "string") return "upload";
+  if (value.startsWith("attach://")) {
+    const attached = params[value.slice("attach://".length)];
+    return attached && attached.upload ? describeUpload(attached) : "upload";
+  }
+  if (/^https?:\/\//i.test(value)) return "url";
+  return "file_id";
+}
+
+function describeUpload(file) {
+  const parts = [file.name || "upload"];
+  if (file.size) parts.push(formatBytes(file.size));
+  return parts.join(", ");
+}
+
+function formatBytes(n) {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+// Collect call parameters from the query string and the body. Uploaded files in
+// multipart/form-data are recorded as { upload, name, size } markers, never kept.
 async function extractParams(request, url) {
   const params = {};
   for (const [key, value] of url.searchParams) params[key] = value;
@@ -451,6 +539,18 @@ async function extractParams(request, url) {
 
   const contentType = (request.headers.get("content-type") || "").toLowerCase();
   try {
+    if (contentType.includes("multipart/form-data")) {
+      // Only buffer multipart bodies with a known, capped length; chunked
+      // uploads of unknown size are skipped.
+      if (!contentLength) return params;
+      for (const [key, value] of await request.formData()) {
+        params[key] =
+          typeof value === "string"
+            ? value
+            : { upload: true, name: value.name || null, size: value.size || 0 };
+      }
+      return params;
+    }
     if (contentType.includes("application/json")) {
       Object.assign(params, await request.json());
     } else if (contentType.includes("application/x-www-form-urlencoded")) {
