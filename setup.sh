@@ -109,6 +109,22 @@ else
   printf '  skipped\n'
 fi
 
+# ---- optional: admin dashboard ------------------------------------------
+step "Admin dashboard (optional)"
+printf '%s  Access keys, a daily limit for bots without a key, bot blocking and\n' "$DIM"
+printf '  crypto-spam alerts at /admin. Needs live stats (D1) enabled.%s\n' "$RST"
+if ask "Set an admin password now?" "n"; then
+  ADMIN_PW="$(prompt 'Admin password (12+ characters)')"
+  if [ "${#ADMIN_PW}" -ge 12 ]; then
+    printf '%s' "$ADMIN_PW" | $WRANGLER pages secret put ADMIN_PASSWORD
+    ok "admin password set; open https://<your-domain>/admin/"
+  else
+    warn "password too short; skipping (set ADMIN_PASSWORD later)"
+  fi
+else
+  printf '  skipped\n'
+fi
+
 # ---- done ----------------------------------------------------------------
 step "Done"
 printf '%s%sYour proxy is live.%s\n\n' "$GRN" "$BOLD" "$RST"

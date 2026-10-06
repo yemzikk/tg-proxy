@@ -14,22 +14,52 @@
 // Optional access control: set ALLOWED_BOT_IDS to a comma-separated list of bot
 // ids (the number before ":" in a token) to restrict the proxy to your own
 // bots. Leave it unset to run as an open relay (the default).
+//
+// With the D1 binding, the admin dashboard (/admin) adds access keys, a free
+// daily send* limit for bots without a key, a bot block list and a crypto-spam
+// detector that alerts a log group. A key is passed as /k/<key>/bot<TOKEN>/...
+// or as an X-Proxy-Key header.
 
-const TELEGRAM_ORIGIN = "https://api.telegram.org";
+import {
+  TELEGRAM_ORIGIN,
+  getDb,
+  defaultSettings,
+  mergeSettings,
+  utcDay,
+  secondsUntilUtcMidnight,
+  sha256Hex,
+  escapeHtml,
+  sendLogMessage,
+} from "../lib/store.js";
+import { detectSpam, spamText } from "../lib/spam.js";
 
 // Cap on the body size we will buffer for logging. Larger bodies are forwarded
 // to Telegram untouched but skipped by the log parser to avoid memory blow-up.
 const MAX_LOG_BODY_BYTES = 256 * 1024;
 
+// One spam alert per bot per this window, so a spam run cannot flood the log
+// group (every event is still recorded in D1 and shown in the dashboard).
+const SPAM_ALERT_WINDOW_MS = 10 * 60 * 1000;
+
 export async function onRequest(context) {
   const { request, next, env, waitUntil } = context;
   const url = new URL(request.url);
 
+  // An access key may be given as a path prefix, /k/<key>/bot<token>/..., which
+  // works with any client library's base-URL setting, or as an X-Proxy-Key
+  // header. Either way it is stripped before the request reaches Telegram.
+  let pathname = url.pathname;
+  let accessKey = request.headers.get("x-proxy-key");
+  const keyMatch = pathname.match(/^\/k\/([^/]+)(\/.*)$/);
+  if (keyMatch) {
+    accessKey = decodeURIComponent(keyMatch[1]);
+    pathname = keyMatch[2];
+  }
+
   // Telegram Bot API methods live under /bot<token>/..., and file downloads
   // under /file/bot<token>/.... Anything else falls through to the static
   // site (the landing page in index.html).
-  const isProxyPath =
-    url.pathname.startsWith("/bot") || url.pathname.startsWith("/file/bot");
+  const isProxyPath = pathname.startsWith("/bot") || pathname.startsWith("/file/bot");
   if (!isProxyPath) {
     return next();
   }
@@ -39,52 +69,99 @@ export async function onRequest(context) {
     return new Response(null, { headers: corsHeaders() });
   }
 
+  // Parse the bot id and method out of the path once, with the secret token
+  // redacted. Error-log rows reuse this so the full token is never stored.
+  const pathInfo = parseRequestPath(pathname);
+
   // Optional allow-list: when ALLOWED_BOT_IDS is set, only proxy requests for
   // those bot ids. This closes off open-relay abuse (stats poisoning, log
   // flooding, invocation cost) for self-hosters who only run their own bots.
   if (env.ALLOWED_BOT_IDS) {
     const allowed = env.ALLOWED_BOT_IDS.split(",").map((s) => s.trim()).filter(Boolean);
-    const botId = (url.pathname.match(/^\/(?:file\/)?bot([^/:]+)/) || [])[1];
-    if (!botId || !allowed.includes(botId)) {
-      return new Response("Forbidden: this bot is not allowed on this proxy.", {
-        status: 403,
-        headers: corsHeaders(),
-      });
+    if (!pathInfo.botId || !allowed.includes(pathInfo.botId)) {
+      return telegramError(403, "Forbidden: this bot is not allowed on this proxy.");
     }
   }
 
-  // Decide whether this call should be logged. If so, clone the request now —
-  // a request body can only be read once, and the original is consumed by the
-  // upstream fetch below.
-  const logTarget = getLogTarget(url.pathname);
-  const loggingEnabled = env.LOG_BOT_TOKEN && env.LOG_CHANNEL_ID && logTarget;
-  const requestForLog = loggingEnabled ? request.clone() : null;
-  // Capture request metadata from the original request (cf + headers) up front;
-  // the clone is only used for the body.
-  const logMeta = loggingEnabled ? requestMeta(request) : null;
+  // The D1 binding (optional) backs the public stats, the durable error log and
+  // access control. Without it the proxy is an open relay, as before.
+  const statsDb = getDb(env);
+  const logTarget = getLogTarget(pathname);
 
-  // The D1 binding (optional) backs both the public stats and the durable error
-  // log. Resolve it once, up front, so it is available on every path below.
-  const statsDb = env.tg_proxy_stats || env.DB;
+  // Access control: blocked bots, access keys and the free daily limit. Returns
+  // a ready response when the request is refused.
+  let gate = null;
+  if (statsDb) {
+    gate = await checkAccess(statsDb, env, waitUntil, {
+      botId: pathInfo.botId,
+      isSend: Boolean(logTarget),
+      accessKey,
+      request,
+    });
+    if (gate.response) return gate.response;
+  }
 
-  // Parse the bot id and method out of the path once, with the secret token
-  // redacted. Error-log rows reuse this so the full token is never stored.
-  const pathInfo = parseRequestPath(url.pathname);
+  // Parse the call parameters once if logging or spam scanning needs them. Read
+  // from a clone: a request body can only be read once, and the original is
+  // consumed by the upstream fetch below.
+  const loggingEnabled = Boolean(env.LOG_BOT_TOKEN && env.LOG_CHANNEL_ID && logTarget);
+  const scanSpam = Boolean(
+    logTarget && gate && !gate.authenticated && gate.settings.spam_detection === "on"
+  );
+  const params =
+    loggingEnabled || scanSpam ? await extractParams(request.clone(), url) : null;
+  // Capture request metadata from the original request (cf + headers) up front.
+  const logMeta = loggingEnabled || scanSpam ? requestMeta(request) : null;
+
+  // Spam check (unauthenticated traffic only; key holders are trusted). Flagged
+  // messages are recorded and alerted to the log group, and depending on the
+  // spam_action setting dropped and/or the bot blocked.
+  if (scanSpam) {
+    const media = describeMedia(logTarget.method, params);
+    const spam = detectSpam(spamText(params, media.captions), gate.settings.spam_keywords);
+    if (spam.isSpam) {
+      const action = gate.settings.spam_action;
+      waitUntil(
+        handleSpam(statsDb, env, {
+          spam,
+          action,
+          settings: gate.settings,
+          botId: pathInfo.botId,
+          method: logTarget.method,
+          params,
+          media,
+          meta: logMeta,
+          request,
+          origin: url.origin,
+        }).catch((err) => console.error("proxy: spam handling failed", err && err.message))
+      );
+      if (action === "drop" || action === "block_bot") {
+        return telegramError(403, "Forbidden: message rejected as spam by this proxy.");
+      }
+    }
+  }
 
   // Rebuild the request against the Telegram origin, preserving path, query,
-  // method, headers and body. new Request(url, request) copies all of those,
-  // and fetch() recomputes the Host header from the new URL automatically.
-  const upstreamUrl = TELEGRAM_ORIGIN + url.pathname + url.search;
+  // method, headers and body, minus the proxy's own access-key header. fetch()
+  // recomputes the Host header from the new URL automatically.
+  const upstreamUrl = TELEGRAM_ORIGIN + pathname + url.search;
+  const upstreamHeaders = new Headers(request.headers);
+  upstreamHeaders.delete("x-proxy-key");
+  const hasBody = request.method !== "GET" && request.method !== "HEAD";
   let upstream;
   try {
-    upstream = await fetch(new Request(upstreamUrl, request));
+    upstream = await fetch(upstreamUrl, {
+      method: request.method,
+      headers: upstreamHeaders,
+      body: hasBody ? request.body : null,
+    });
   } catch (err) {
     // The upstream is unreachable (often the very reason this proxy exists).
     // This is the only failure mode the proxy is actually responsible for, so it
     // is the only thing counted as an error in /stats. Record it in Cloudflare's
     // live logs and the durable error log (neither of which depend on Telegram),
     // bump the errors counter, then return a clean 502 rather than crashing.
-    console.error("proxy: upstream fetch failed", url.pathname, err && err.message);
+    console.error("proxy: upstream fetch failed", pathInfo.redactedPath, err && err.message);
     waitUntil(
       logError(statsDb, "upstream_unreachable", {
         status: 502,
@@ -103,22 +180,12 @@ export async function onRequest(context) {
         })
       );
     }
-    return new Response(
-      JSON.stringify({
-        ok: false,
-        error_code: 502,
-        description: "Proxy could not reach api.telegram.org",
-      }),
-      {
-        status: 502,
-        headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders() },
-      }
-    );
+    return telegramError(502, "Proxy could not reach api.telegram.org");
   }
 
   if (loggingEnabled) {
     waitUntil(
-      logMessage(requestForLog, url, logTarget, logMeta, env).catch((err) => {
+      logMessage(params, logTarget, logMeta, env).catch((err) => {
         // A logging failure must never affect the proxied request. Record it in
         // Cloudflare's logs and the durable error log, not the channel itself.
         console.error("proxy: log delivery failed", err && err.message);
@@ -182,6 +249,163 @@ export async function onRequest(context) {
   });
 }
 
+// Decide whether a request may use the proxy. Reads settings, the block list
+// and the access key (or bumps the free-tier counter) in one D1 round trip.
+// Returns { response } when refused, else { authenticated, settings }.
+// On a database error it fails open with the default settings, so a missing
+// migration never takes the proxy down; the error is logged.
+async function checkAccess(db, env, waitUntil, { botId, isSend, accessKey, request }) {
+  const now = new Date();
+  const day = utcDay(now);
+  const bot = botId || "";
+  try {
+    const stmts = [
+      db.prepare("SELECT key, value FROM settings"),
+      db.prepare("SELECT 1 AS hit FROM blocked_bots WHERE bot_id = ?").bind(bot),
+    ];
+    if (accessKey) {
+      stmts.push(
+        db.prepare("SELECT id FROM access_keys WHERE key_hash = ?").bind(await sha256Hex(accessKey))
+      );
+    } else if (isSend) {
+      stmts.push(usageUpsert(db, day, bot, 1));
+    }
+    const [settingsRes, blockedRes, thirdRes] = await db.batch(stmts);
+    const settings = mergeSettings(env, settingsRes.results);
+
+    if (blockedRes.results.length) {
+      waitUntil(
+        db
+          .prepare("UPDATE blocked_bots SET hits = hits + 1, last_seen = ? WHERE bot_id = ?")
+          .bind(now.toISOString(), bot)
+          .run()
+          .catch(() => {})
+      );
+      return { response: telegramError(403, "Forbidden: this bot is blocked on this proxy.") };
+    }
+
+    if (accessKey) {
+      const keyRow = thirdRes.results[0];
+      if (!keyRow) {
+        return { response: telegramError(401, "Unauthorized: invalid proxy access key.") };
+      }
+      const writes = [
+        db
+          .prepare("UPDATE access_keys SET uses = uses + 1, last_used = ? WHERE id = ?")
+          .bind(now.toISOString(), keyRow.id),
+      ];
+      if (isSend) writes.push(usageUpsert(db, day, bot, 0));
+      waitUntil(db.batch(writes).catch((e) => console.error("proxy: key usage write failed", e && e.message)));
+      return { authenticated: true, settings };
+    }
+
+    // Unauthenticated: 0 means an access key is required; otherwise send* calls
+    // are capped per bot per UTC day. Non-numeric means unlimited.
+    const limit = parseInt(settings.free_daily_limit, 10);
+    if (limit === 0) {
+      return {
+        response: telegramError(401, "Unauthorized: this proxy requires an access key."),
+      };
+    }
+    if (isSend && Number.isFinite(limit) && limit > 0) {
+      const used = Number(thirdRes?.results?.[0]?.free_count ?? 0);
+      if (used > limit) {
+        const retryAfter = secondsUntilUtcMidnight(now);
+        return {
+          response: telegramError(
+            429,
+            `Too Many Requests: daily limit of ${limit} messages for unauthenticated bots reached; ask the proxy admin for an access key. Retry after ${retryAfter}`,
+            { retry_after: retryAfter }
+          ),
+        };
+      }
+    }
+    return { authenticated: false, settings };
+  } catch (err) {
+    console.error("proxy: access check failed", err && err.message);
+    waitUntil(logError(db, "access_check_failed", { botId, message: err && err.message }));
+    return { authenticated: false, settings: defaultSettings(env) };
+  }
+}
+
+// Atomic per-bot daily counter. `free` is 1 for unauthenticated calls.
+function usageUpsert(db, day, botId, free) {
+  return db
+    .prepare(
+      `INSERT INTO bot_usage (day, bot_id, count, free_count) VALUES (?, ?, 1, ?)
+       ON CONFLICT (day, bot_id) DO UPDATE
+         SET count = count + 1, free_count = free_count + excluded.free_count
+       RETURNING free_count`
+    )
+    .bind(day, botId, free);
+}
+
+// Record a spam event, apply the configured action, and alert the log group
+// (at most once per bot per SPAM_ALERT_WINDOW_MS).
+async function handleSpam(db, env, ctx) {
+  const { spam, action, settings, botId, method, params, media, meta, request, origin } = ctx;
+  const now = new Date();
+  const text = String(params.text ?? params.caption ?? media.captions.join("\n\n") ?? "");
+  const chatId = params.chat_id != null ? String(params.chat_id) : null;
+  const caller = callerFields(request);
+  const since = new Date(now.getTime() - SPAM_ALERT_WINDOW_MS).toISOString();
+
+  const [recent] = await db.batch([
+    db
+      .prepare("SELECT COUNT(*) AS n FROM spam_events WHERE bot_id = ? AND ts > ?")
+      .bind(botId || "", since),
+    db
+      .prepare(
+        `INSERT INTO spam_events (ts, bot_id, method, chat_id, score, reasons, text, action, ip, country)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        now.toISOString(),
+        botId || "",
+        method,
+        chatId,
+        spam.score,
+        spam.reasons.join(", "),
+        text.slice(0, 2000),
+        action,
+        caller.ip,
+        caller.country
+      ),
+    ...(action === "block_bot"
+      ? [
+          db
+            .prepare(
+              "INSERT OR IGNORE INTO blocked_bots (bot_id, reason, created_at) VALUES (?, ?, ?)"
+            )
+            .bind(botId || "", `auto: spam (${spam.reasons.join(", ")})`.slice(0, 300), now.toISOString()),
+        ]
+      : []),
+  ]);
+
+  const chat = settings.spam_log_chat_id;
+  if (!env.LOG_BOT_TOKEN || !chat) return;
+  if (Number(recent.results[0]?.n ?? 0) > 0) return;
+
+  const actionLabel = {
+    log: "logged, delivered",
+    drop: "message dropped",
+    block_bot: "message dropped, bot blocked",
+  }[action] || action;
+  let body = text || "(no text)";
+  if (body.length > 3000) body = body.slice(0, 3000) + "…";
+  const lines = [
+    `🚨 <b>Spam detected</b> · bot <code>${escapeHtml(botId)}</code>`,
+    `${escapeHtml(method)}${chatId ? ` → <code>${escapeHtml(chatId)}</code>` : ""}`,
+    `Score ${spam.score}: ${escapeHtml(spam.reasons.join(", "))}`,
+    `Action: <b>${escapeHtml(actionLabel)}</b>`,
+  ];
+  if (media.summary) lines.push(media.summary);
+  lines.push("", escapeHtml(body));
+  lines.push(...requestDetailLines(meta));
+  lines.push("", `Manage: ${escapeHtml(origin)}/admin/`);
+  await sendLogMessage(env, chat, lines.join("\n"));
+}
+
 // Returns { botToken, method } for loggable send* calls, otherwise null.
 function getLogTarget(pathname) {
   const match = pathname.match(/^\/bot([^/]+)\/(\w+)/);
@@ -191,9 +415,8 @@ function getLogTarget(pathname) {
   return { botToken, method };
 }
 
-async function logMessage(request, url, target, meta, env) {
+async function logMessage(params, target, meta, env) {
   const { botToken, method } = target;
-  const params = await extractParams(request, url);
   const chatId = params.chat_id;
   const media = describeMedia(method, params);
   const text = params.text ?? params.caption ?? media.captions.join("\n\n");
@@ -564,17 +787,21 @@ async function extractParams(request, url) {
   return params;
 }
 
-function escapeHtml(value) {
-  return String(value).replace(
-    /[&<>]/g,
-    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[char]
-  );
+// A Telegram-shaped error reply, so client libraries surface the description
+// (and honour retry_after on 429) as if Telegram itself had answered.
+function telegramError(status, description, parameters) {
+  const body = { ok: false, error_code: status, description };
+  if (parameters) body.parameters = parameters;
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json; charset=utf-8", ...corsHeaders() },
+  });
 }
 
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, X-Proxy-Key",
   };
 }

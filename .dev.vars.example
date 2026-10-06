@@ -9,3 +9,13 @@ LOG_CHANNEL_ID=
 # e.g. ALLOWED_BOT_IDS=123456789,987654321
 # When set, the proxy only serves those bots. Leave unset for an open relay.
 ALLOWED_BOT_IDS=
+
+# Admin dashboard at /admin (needs the D1 binding). At least 12 characters.
+ADMIN_PASSWORD=
+
+# Daily send* limit per bot for requests without an access key (default 50).
+# The value saved in the dashboard takes precedence.
+FREE_DAILY_LIMIT=
+
+# Chat the log bot posts spam alerts to (defaults to LOG_CHANNEL_ID).
+SPAM_LOG_CHAT_ID=

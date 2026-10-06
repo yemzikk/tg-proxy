@@ -91,6 +91,50 @@ Requests for any other bot id receive `403`. This is the recommended setting for
 a private deployment, and it also prevents the abuse described in
 [Security and privacy](#security-and-privacy).
 
+### Admin dashboard, access keys and spam protection
+
+With the D1 binding and an `ADMIN_PASSWORD` secret (12+ characters), the
+dashboard at `/admin` lets you:
+
+- **Create access keys.** Bots with a key are unrestricted. Pass the key as a
+  base-URL prefix, which works with any client library, or as a header:
+
+  ```
+  https://<your-domain>/k/<KEY>/bot<TOKEN>/sendMessage
+  curl -H "X-Proxy-Key: <KEY>" https://<your-domain>/bot<TOKEN>/getMe
+  ```
+
+  Only a SHA-256 hash of each key is stored, so a key is shown once at creation.
+  The key is stripped before the request reaches Telegram. An unknown key gets
+  `401`.
+- **Limit bots without a key.** They get a daily quota of `send*` calls per bot
+  (default 50, reset at UTC midnight), after which they receive a Telegram-style
+  `429` with `retry_after`. Set the limit to `0` to require a key for every
+  request, or leave it empty for no limit.
+- **Block bots.** A blocked bot id gets `403` on every request, key or not.
+  Per-bot daily usage is listed so you can spot abusers and block them in one click.
+- **Catch crypto spam.** `send*` calls from bots without a key are scanned
+  (text, captions, polls, inline buttons) for bitcoin/USDT/airdrop spam in
+  English and Chinese and for BTC/ETH/TRON wallet addresses, plus your own
+  keywords. A hit is recorded and posted to a log group by `LOG_BOT_TOKEN`
+  (at most one alert per bot per 10 minutes). You choose the action: alert
+  only, drop the message, or drop it and block the bot.
+
+```sh
+npx wrangler pages secret put ADMIN_PASSWORD
+npx wrangler pages secret put LOG_BOT_TOKEN     # for spam alerts (bot must be in the group)
+npx wrangler pages secret put SPAM_LOG_CHAT_ID  # optional; also editable in the dashboard
+npm run db:init                                 # adds the new tables; safe to re-run
+```
+
+Sessions are HMAC-signed `HttpOnly`/`SameSite=Strict` cookies valid for 12 hours;
+changing the password signs everyone out. Failed logins are capped at 10 per IP
+per hour. For extra protection, put `/admin*` and `/api/admin/*` behind
+[Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/).
+
+If the access-control tables are missing (schema not applied), the proxy fails
+open: it keeps forwarding and records `access_check_failed` in `error_log`.
+
 ### Live stats (D1)
 
 The landing page can show messages delivered and the error rate, counted in a
@@ -215,7 +259,9 @@ Left open, the proxy can be used by anyone, which means:
 
 Mitigations, in order of effectiveness:
 
-1. Set [`ALLOWED_BOT_IDS`](#access-control-allowed_bot_ids) to serve only your bots.
+1. Set [`ALLOWED_BOT_IDS`](#access-control-allowed_bot_ids) to serve only your bots,
+   or use the [admin dashboard](#admin-dashboard-access-keys-and-spam-protection)
+   to require access keys or cap bots without one.
 2. Add a [WAF rate-limiting rule](https://developers.cloudflare.com/waf/rate-limiting-rules/)
    and enable Bot Fight Mode in the Cloudflare dashboard.
 3. Put the project behind [Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/policies/access/)
@@ -248,11 +294,14 @@ are harmless to it, but be aware they are passed through.
 ```
 functions/[[path]].js   catch-all proxy (Pages Function)
 functions/stats.js      JSON stats endpoint at /stats
+functions/api/admin/    admin API behind ADMIN_PASSWORD
+lib/                    shared settings/crypto helpers and the spam detector
+public/admin/           admin dashboard shown at /admin
 public/index.html       landing page shown at /
 public/favicon.*        favicon (SVG, PNG, ICO) + apple-touch-icon
 public/og.*             social preview image (og.svg source, og.png output)
 wrangler.toml           Pages config and optional D1 binding
-schema.sql              stats table schema
+schema.sql              D1 schema (stats, error log, access control)
 setup.sh                one-command install, configure, and deploy
 ```
 

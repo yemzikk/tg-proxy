@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tg-proxy admin</title>
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="theme-color" content="#0b0f14" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0f14;
+        --panel: #11161d;
+        --panel-2: #0c1117;
+        --border: #222b36;
+        --text: #e9eef4;
+        --muted: #8a96a6;
+        --accent: #2aabee;
+        --green: #3fb950;
+        --red: #f85149;
+        --yellow: #d29922;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        line-height: 1.5;
+        font-size: 15px;
+      }
+      code, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+      a { color: var(--accent); }
+      [hidden] { display: none !important; }
+
+      header {
+        position: sticky; top: 0; z-index: 5;
+        background: rgba(11, 15, 20, 0.85); backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--border);
+      }
+      .bar { max-width: 1080px; margin: 0 auto; padding: 12px 16px; display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+      .brand { font-weight: 700; margin-right: auto; }
+      nav { display: flex; gap: 4px; flex-wrap: wrap; }
+      nav button {
+        background: none; border: 0; color: var(--muted); padding: 6px 10px; border-radius: 6px;
+        font: inherit; font-size: 0.9rem; cursor: pointer;
+      }
+      nav button:hover { color: var(--text); }
+      nav button.active { color: var(--text); background: var(--panel); }
+      main { max-width: 1080px; margin: 0 auto; padding: 24px 16px 60px; }
+      h2 { font-size: 1.1rem; margin: 0 0 4px; }
+      .sub { color: var(--muted); margin: 0 0 16px; font-size: 0.9rem; }
+
+      .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+      .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-bottom: 16px; }
+      .tile { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+      .tile .v { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+      .tile .l { color: var(--muted); font-size: 0.82rem; }
+
+      .table-wrap { overflow-x: auto; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+      th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+      th { color: var(--muted); font-weight: 600; font-size: 0.8rem; white-space: nowrap; }
+      td.num { text-align: right; font-variant-numeric: tabular-nums; }
+      .empty { color: var(--muted); padding: 16px 10px; }
+      .msg { white-space: pre-wrap; word-break: break-word; max-width: 420px; max-height: 120px; overflow: auto; }
+
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      input, select, textarea {
+        background: var(--panel-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;
+        padding: 8px 10px; font: inherit; font-size: 0.9rem; min-width: 0;
+      }
+      textarea { width: 100%; min-height: 90px; resize: vertical; }
+      input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+      button.btn {
+        background: var(--accent); color: #05131c; border: 0; border-radius: 6px; padding: 8px 14px;
+        font: inherit; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+      }
+      button.btn.ghost { background: none; color: var(--text); border: 1px solid var(--border); }
+      button.btn.danger { background: none; color: var(--red); border: 1px solid var(--border); }
+      button.btn.small { padding: 4px 10px; font-size: 0.82rem; }
+      button.btn:disabled { opacity: 0.5; cursor: default; }
+      .tag { display: inline-block; font-size: 0.75rem; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); }
+      .tag.red { color: var(--red); } .tag.green { color: var(--green); } .tag.yellow { color: var(--yellow); }
+      label.field { display: block; margin-bottom: 14px; }
+      label.field > span { display: block; font-weight: 600; font-size: 0.9rem; margin-bottom: 4px; }
+      label.field small { display: block; color: var(--muted); font-size: 0.82rem; margin-top: 4px; }
+
+      .notice { border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: 0.9rem; border: 1px solid var(--border); }
+      .notice.ok { border-color: rgba(63, 185, 80, 0.5); }
+      .notice.err { border-color: rgba(248, 81, 73, 0.6); color: #ffb4ae; }
+      .newkey { background: var(--panel-2); border: 1px dashed var(--accent); padding: 12px; border-radius: 8px; word-break: break-all; }
+
+      #login { max-width: 360px; margin: 12vh auto; }
+      #login input { width: 100%; margin-bottom: 10px; }
+      #login button { width: 100%; }
+    </style>
+  </head>
+  <body>
+    <section id="login" hidden>
+      <div class="panel">
+        <h2>tg-proxy admin</h2>
+        <p class="sub">Sign in with the ADMIN_PASSWORD secret.</p>
+        <form id="login-form">
+          <input type="password" id="password" placeholder="Password" autocomplete="current-password" required />
+          <button class="btn" type="submit">Sign in</button>
+        </form>
+        <p id="login-error" class="notice err" hidden></p>
+      </div>
+    </section>
+
+    <div id="app" hidden>
+      <header>
+        <div class="bar">
+          <span class="brand">tg-proxy admin</span>
+          <nav id="tabs">
+            <button data-tab="overview">Overview</button>
+            <button data-tab="bots">Bots</button>
+            <button data-tab="blocked">Blocked</button>
+            <button data-tab="spam">Spam</button>
+            <button data-tab="keys">Access keys</button>
+            <button data-tab="settings">Settings</button>
+          </nav>
+          <button class="btn ghost small" id="logout">Sign out</button>
+        </div>
+      </header>
+      <main>
+        <div id="flash" class="notice" hidden></div>
+
+        <section data-view="overview">
+          <h2>Overview</h2>
+          <p class="sub">Today is <span id="ov-day"></span> (UTC). Daily counters reset at UTC midnight.</p>
+          <div class="tiles" id="ov-tiles"></div>
+        </section>
+
+        <section data-view="bots" hidden>
+          <h2>Bots by day</h2>
+          <p class="sub">send* calls per bot. "Free" calls are those without an access key; the daily limit applies to them.</p>
+          <div class="row" style="margin-bottom: 12px">
+            <input type="date" id="bots-day" />
+            <button class="btn ghost small" id="bots-refresh">Refresh</button>
+          </div>
+          <div class="panel table-wrap"><table id="bots-table"></table></div>
+        </section>
+
+        <section data-view="blocked" hidden>
+          <h2>Blocked bots</h2>
+          <p class="sub">Blocked bots get a 403 on every request, with or without an access key.</p>
+          <form class="panel row" id="block-form">
+            <input id="block-id" placeholder="Bot id (e.g. 123456789)" required style="flex: 1 1 180px" />
+            <input id="block-reason" placeholder="Reason (optional)" style="flex: 2 1 240px" />
+            <button class="btn" type="submit">Block bot</button>
+          </form>
+          <div class="panel table-wrap"><table id="blocked-table"></table></div>
+        </section>
+
+        <section data-view="spam" hidden>
+          <h2>Spam detections</h2>
+          <p class="sub">Messages from bots without an access key that the crypto-spam detector flagged. Latest 200.</p>
+          <div class="row" style="margin-bottom: 12px">
+            <input id="spam-bot" placeholder="Filter by bot id" />
+            <button class="btn ghost small" id="spam-refresh">Refresh</button>
+          </div>
+          <div class="panel table-wrap"><table id="spam-table"></table></div>
+        </section>
+
+        <section data-view="keys" hidden>
+          <h2>Access keys</h2>
+          <p class="sub">
+            Bots with a key skip the daily limit and spam checks. Use it as a base-URL prefix:
+            <code>https://<span class="host"></span>/k/&lt;KEY&gt;/bot&lt;TOKEN&gt;/sendMessage</code>,
+            or send it as an <code>X-Proxy-Key</code> header.
+          </p>
+          <form class="panel row" id="key-form">
+            <input id="key-label" placeholder="Label (who is this for?)" required style="flex: 1 1 260px" />
+            <button class="btn" type="submit">Create key</button>
+          </form>
+          <div id="newkey" class="panel" hidden>
+            <p style="margin-top: 0"><strong>Copy this key now.</strong> Only its hash is stored, so it cannot be shown again.</p>
+            <div class="newkey mono" id="newkey-value"></div>
+            <div class="row" style="margin-top: 10px">
+              <button class="btn small" id="newkey-copy">Copy</button>
+              <span class="sub" style="margin: 0">Base URL: <code id="newkey-url"></code></span>
+            </div>
+          </div>
+          <div class="panel table-wrap"><table id="keys-table"></table></div>
+        </section>
+
+        <section data-view="settings" hidden>
+          <h2>Settings</h2>
+          <p class="sub">Changes apply to new requests within a second.</p>
+          <form class="panel" id="settings-form">
+            <label class="field">
+              <span>Daily limit for bots without a key</span>
+              <input id="s-limit" inputmode="numeric" placeholder="unlimited" />
+              <small>send* calls per bot per UTC day. 0 = an access key is required for everything. Empty = unlimited.</small>
+            </label>
+            <label class="field">
+              <span>Spam detection</span>
+              <select id="s-detect">
+                <option value="on">On</option>
+                <option value="off">Off</option>
+              </select>
+              <small>Scans text, captions, polls and buttons of send* calls from bots without a key for crypto/bitcoin spam (English and Chinese) and wallet addresses.</small>
+            </label>
+            <label class="field">
+              <span>When spam is detected</span>
+              <select id="s-action">
+                <option value="log">Alert only, still deliver the message</option>
+                <option value="drop">Alert and drop the message</option>
+                <option value="block_bot">Alert, drop the message and block the bot</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>Extra spam keywords</span>
+              <textarea id="s-keywords" placeholder="one per line, e.g.&#10;免费送&#10;t.me/somescamchannel"></textarea>
+              <small>Any match flags the message on its own. Case-insensitive substring match.</small>
+            </label>
+            <label class="field">
+              <span>Spam log group</span>
+              <input id="s-chat" placeholder="-1001234567890" />
+              <small id="s-chat-help">Chat id the log bot (LOG_BOT_TOKEN) posts spam alerts to. Add the bot to the group first.</small>
+            </label>
+            <div class="row">
+              <button class="btn" type="submit">Save settings</button>
+              <button class="btn ghost" type="button" id="test-alert">Send test alert</button>
+            </div>
+          </form>
+        </section>
+      </main>
+    </div>
+
+    <script>
+      const $ = (sel) => document.querySelector(sel);
+      const host = location.host;
+      document.querySelectorAll(".host").forEach((el) => (el.textContent = host));
+
+      async function api(path, options = {}) {
+        const init = { method: options.method || "GET", credentials: "same-origin", headers: {} };
+        if (options.body !== undefined) {
+          init.headers["content-type"] = "application/json";
+          init.body = JSON.stringify(options.body);
+        }
+        const res = await fetch("/api/admin/" + path, init);
+        const data = await res.json().catch(() => ({}));
+        if (res.status === 401 && path !== "login") {
+          showLogin();
+          throw new Error("Signed out.");
+        }
+        if (!res.ok) throw new Error(data.error || "Request failed (" + res.status + ")");
+        return data;
+      }
+
+      function flash(text, ok) {
+        const el = $("#flash");
+        el.textContent = text;
+        el.className = "notice " + (ok ? "ok" : "err");
+        el.hidden = false;
+        clearTimeout(flash.t);
+        flash.t = setTimeout(() => (el.hidden = true), 5000);
+      }
+
+      // Build DOM with textContent only: spam rows hold attacker-controlled text.
+      function el(tag, props = {}, children = []) {
+        const node = document.createElement(tag);
+        for (const [k, v] of Object.entries(props)) {
+          if (k === "text") node.textContent = v ?? "";
+          else if (k === "onclick") node.addEventListener("click", v);
+          else node.setAttribute(k, v);
+        }
+        for (const c of [].concat(children)) if (c) node.append(c);
+        return node;
+      }
+
+      function renderTable(table, columns, rows, emptyText) {
+        table.replaceChildren();
+        const head = el("tr", {}, columns.map((c) => el("th", { text: c.label, class: c.num ? "num" : "" })));
+        table.append(el("thead", {}, head));
+        const body = el("tbody");
+        if (!rows.length) {
+          body.append(el("tr", {}, el("td", { class: "empty", colspan: columns.length, text: emptyText })));
+        }
+        for (const row of rows) {
+          body.append(
+            el("tr", {}, columns.map((c) => {
+              const v = c.render ? c.render(row) : row[c.key];
+              const td = el("td", { class: c.num ? "num" : "" });
+              if (v instanceof Node) td.append(v);
+              else td.textContent = v ?? "";
+              return td;
+            }))
+          );
+        }
+        table.append(body);
+      }
+
+      const fmtTime = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+      const fmtNum = (n) => Number(n || 0).toLocaleString();
+      const btn = (text, cls, onclick) => el("button", { class: "btn small " + cls, text, type: "button", onclick });
+
+      async function blockBotPrompt(botId, defaultReason) {
+        const reason = prompt("Block bot " + botId + "? Reason (optional):", defaultReason || "");
+        if (reason === null) return;
+        try {
+          await api("blocked", { method: "POST", body: { bot_id: botId, reason } });
+          flash("Bot " + botId + " blocked.", true);
+          load(current);
+        } catch (e) { flash(e.message); }
+      }
+
+      async function unblock(botId) {
+        try {
+          await api("blocked/" + encodeURIComponent(botId), { method: "DELETE" });
+          flash("Bot " + botId + " unblocked.", true);
+          load(current);
+        } catch (e) { flash(e.message); }
+      }
+
+      const views = {
+        async overview() {
+          const d = await api("overview");
+          $("#ov-day").textContent = d.day;
+          const total = d.delivered + d.errors;
+          const tiles = [
+            [fmtNum(d.sendsToday), "send* calls today"],
+            [fmtNum(d.freeSendsToday), "without a key today"],
+            [fmtNum(d.botsToday), "active bots today"],
+            [fmtNum(d.spam24h), "spam detections, 24h"],
+            [fmtNum(d.blocked), "blocked bots"],
+            [fmtNum(d.keys), "access keys"],
+            [fmtNum(d.delivered), "delivered, all time"],
+            [total ? ((d.errors / total) * 100).toFixed(2) + "%" : "0%", "proxy error rate"],
+          ];
+          $("#ov-tiles").replaceChildren(
+            ...tiles.map(([v, l]) => el("div", { class: "tile" }, [el("div", { class: "v", text: v }), el("div", { class: "l", text: l })]))
+          );
+        },
+
+        async bots() {
+          const input = $("#bots-day");
+          if (!input.value) input.value = new Date().toISOString().slice(0, 10);
+          const d = await api("usage?day=" + input.value);
+          renderTable($("#bots-table"), [
+            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "send* calls", num: true, render: (r) => fmtNum(r.count) },
+            { label: "Free", num: true, render: (r) => fmtNum(r.free_count) },
+            { label: "Spam flags", num: true, render: (r) => r.spam ? el("span", { class: "tag yellow", text: fmtNum(r.spam) }) : "0" },
+            { label: "Status", render: (r) => el("span", { class: "tag " + (r.blocked ? "red" : "green"), text: r.blocked ? "blocked" : "active" }) },
+            { label: "", render: (r) => r.blocked ? btn("Unblock", "ghost", () => unblock(r.bot_id)) : btn("Block", "danger", () => blockBotPrompt(r.bot_id)) },
+          ], d.bots, "No send* calls on this day.");
+        },
+
+        async blocked() {
+          const d = await api("blocked");
+          renderTable($("#blocked-table"), [
+            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "Reason", key: "reason" },
+            { label: "Blocked", render: (r) => fmtTime(r.created_at) },
+            { label: "Refused requests", num: true, render: (r) => fmtNum(r.hits) },
+            { label: "Last attempt", render: (r) => fmtTime(r.last_seen) },
+            { label: "", render: (r) => btn("Unblock", "ghost", () => unblock(r.bot_id)) },
+          ], d.blocked, "No bots are blocked.");
+        },
+
+        async spam() {
+          const bot = $("#spam-bot").value.trim();
+          const d = await api("spam" + (bot ? "?bot=" + encodeURIComponent(bot) : ""));
+          renderTable($("#spam-table"), [
+            { label: "Time", render: (r) => fmtTime(r.ts) },
+            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "Chat", render: (r) => el("code", { text: r.chat_id || "—" }) },
+            { label: "Message", render: (r) => el("div", { class: "msg", text: r.text || "(no text)" }) },
+            { label: "Matched", render: (r) => r.score + ": " + (r.reasons || "") },
+            { label: "Action", key: "action" },
+            { label: "Caller", render: (r) => [r.ip, r.country].filter(Boolean).join(" · ") },
+            { label: "", render: (r) => btn("Block bot", "danger", () => blockBotPrompt(r.bot_id, "spam")) },
+          ], d.events, "No spam detected yet.");
+        },
+
+        async keys() {
+          const d = await api("keys");
+          renderTable($("#keys-table"), [
+            { label: "Label", key: "label" },
+            { label: "Key", render: (r) => el("code", { text: r.prefix + "…" }) },
+            { label: "Created", render: (r) => fmtTime(r.created_at) },
+            { label: "Last used", render: (r) => fmtTime(r.last_used) },
+            { label: "Requests", num: true, render: (r) => fmtNum(r.uses) },
+            { label: "", render: (r) => btn("Revoke", "danger", async () => {
+                if (!confirm('Revoke key "' + r.label + '"? Bots using it will get 401 immediately.')) return;
+                try {
+                  await api("keys/" + r.id, { method: "DELETE" });
+                  flash("Key revoked.", true);
+                  load("keys");
+                } catch (e) { flash(e.message); }
+              }) },
+          ], d.keys, "No access keys yet.");
+        },
+
+        async settings() {
+          const d = await api("settings");
+          const s = d.settings;
+          $("#s-limit").value = s.free_daily_limit;
+          $("#s-detect").value = s.spam_detection;
+          $("#s-action").value = s.spam_action;
+          $("#s-keywords").value = s.spam_keywords;
+          $("#s-chat").value = s.spam_log_chat_id;
+          if (!d.logBot) {
+            $("#s-chat-help").textContent = "LOG_BOT_TOKEN is not set, so alerts cannot be sent. Set it as a Pages secret first; spam is still recorded here.";
+          }
+        },
+      };
+
+      let current = "overview";
+      async function load(name) {
+        current = name;
+        document.querySelectorAll("#tabs button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+        document.querySelectorAll("[data-view]").forEach((s) => (s.hidden = s.dataset.view !== name));
+        if (location.hash !== "#" + name) history.replaceState(null, "", "#" + name);
+        try { await views[name](); } catch (e) { if (e.message !== "Signed out.") flash(e.message); }
+      }
+
+      function showLogin() {
+        $("#app").hidden = true;
+        $("#login").hidden = false;
+        $("#password").focus();
+      }
+      function showApp() {
+        $("#login").hidden = true;
+        $("#app").hidden = false;
+        const tab = location.hash.slice(1);
+        load(views[tab] ? tab : "overview");
+      }
+
+      $("#login-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const err = $("#login-error");
+        err.hidden = true;
+        try {
+          await api("login", { method: "POST", body: { password: $("#password").value } });
+          $("#password").value = "";
+          showApp();
+        } catch (ex) {
+          err.textContent = ex.message;
+          err.hidden = false;
+        }
+      });
+
+      $("#logout").addEventListener("click", async () => {
+        await api("logout", { method: "POST", body: {} }).catch(() => {});
+        showLogin();
+      });
+
+      $("#tabs").addEventListener("click", (e) => {
+        const tab = e.target.closest("button")?.dataset.tab;
+        if (tab) load(tab);
+      });
+      $("#bots-day").addEventListener("change", () => load("bots"));
+      $("#bots-refresh").addEventListener("click", () => load("bots"));
+      $("#spam-refresh").addEventListener("click", () => load("spam"));
+      $("#spam-bot").addEventListener("keydown", (e) => e.key === "Enter" && load("spam"));
+
+      $("#block-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await api("blocked", { method: "POST", body: { bot_id: $("#block-id").value, reason: $("#block-reason").value } });
+          $("#block-id").value = $("#block-reason").value = "";
+          flash("Bot blocked.", true);
+          load("blocked");
+        } catch (ex) { flash(ex.message); }
+      });
+
+      $("#key-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          const { key } = await api("keys", { method: "POST", body: { label: $("#key-label").value } });
+          $("#key-label").value = "";
+          $("#newkey-value").textContent = key;
+          $("#newkey-url").textContent = location.origin + "/k/" + key + "/bot";
+          $("#newkey").hidden = false;
+          load("keys");
+        } catch (ex) { flash(ex.message); }
+      });
+      $("#newkey-copy").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText($("#newkey-value").textContent);
+          flash("Key copied.", true);
+        } catch { flash("Copy failed; select the key and copy it manually."); }
+      });
+
+      $("#settings-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        try {
+          await api("settings", {
+            method: "PUT",
+            body: {
+              settings: {
+                free_daily_limit: $("#s-limit").value,
+                spam_detection: $("#s-detect").value,
+                spam_action: $("#s-action").value,
+                spam_keywords: $("#s-keywords").value,
+                spam_log_chat_id: $("#s-chat").value,
+              },
+            },
+          });
+          flash("Settings saved.", true);
+          load("settings");
+        } catch (ex) { flash(ex.message); }
+      });
+      $("#test-alert").addEventListener("click", async () => {
+        try {
+          await api("test-alert", { method: "POST", body: {} });
+          flash("Test alert sent. Check the log group.", true);
+        } catch (ex) { flash(ex.message); }
+      });
+
+      api("session").then(showApp).catch((e) => {
+        if (e.message !== "Signed out.") {
+          $("#login-error").textContent = e.message;
+          $("#login-error").hidden = false;
+        }
+        showLogin();
+      });
+    </script>
+  </body>
+</html>
