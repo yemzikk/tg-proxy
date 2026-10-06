@@ -113,6 +113,12 @@ dashboard at `/admin` lets you:
   request, or leave it empty for no limit.
 - **Block bots.** A blocked bot id gets `403` on every request, key or not.
   Per-bot daily usage is listed so you can spot abusers and block them in one click.
+- **See what is happening.** The overview charts daily `send*` calls (with and
+  without a key), active bots, spam detections and errors over 7, 14 or 30 days,
+  with today's numbers compared to yesterday. It ranks the top bots, the spam
+  rules that fired, spam by caller country, Telegram's most common rejections and
+  the requests refused by the daily limit. Click any bot id for its 30-day
+  history, recent spam and errors; the Errors tab browses the durable error log.
 - **Catch crypto spam.** `send*` calls from bots without a key are scanned
   (text, captions, polls, inline buttons) for bitcoin/USDT/airdrop spam in
   English and Chinese and for BTC/ETH/TRON wallet addresses, plus your own
@@ -124,7 +130,7 @@ dashboard at `/admin` lets you:
 npx wrangler pages secret put ADMIN_PASSWORD
 npx wrangler pages secret put LOG_BOT_TOKEN     # for spam alerts (bot must be in the group)
 npx wrangler pages secret put SPAM_LOG_CHAT_ID  # optional; also editable in the dashboard
-npm run db:init                                 # adds the new tables; safe to re-run
+npm run db:init                                 # adds the new tables and indexes; safe to re-run
 ```
 
 Sessions are HMAC-signed `HttpOnly`/`SameSite=Strict` cookies valid for 12 hours;

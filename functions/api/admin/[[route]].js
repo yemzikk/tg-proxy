@@ -63,6 +63,12 @@ export async function onRequest(context) {
       case "GET overview":
         waitUntil(cleanup(db));
         return await overview(db);
+      case "GET analytics":
+        return await analytics(db, env, url.searchParams.get("days"));
+      case "GET bot":
+        return await botDetail(db, id);
+      case "GET errors":
+        return await listErrors(db, url.searchParams.get("kind"), url.searchParams.get("bot"));
       case "GET usage":
         return await usage(db, url.searchParams.get("day") || utcDay());
       case "GET keys":
@@ -157,7 +163,9 @@ function isSameOriginJson(request) {
 async function overview(db) {
   const today = utcDay();
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const [stats, usageToday, keys, blocked, spam] = await db.batch([
+  const yesterday = utcDay(new Date(Date.now() - 86400 * 1000));
+  const sinceDay = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  const [stats, usageToday, keys, blocked, spam, usageYesterday, errors, spamPrev, errorsPrev] = await db.batch([
     db.prepare("SELECT delivered, errors FROM stats WHERE id = 1"),
     db.prepare(
       "SELECT COALESCE(SUM(count), 0) AS sends, COALESCE(SUM(free_count), 0) AS free, COUNT(*) AS bots FROM bot_usage WHERE day = ?"
@@ -165,8 +173,15 @@ async function overview(db) {
     db.prepare("SELECT COUNT(*) AS n FROM access_keys"),
     db.prepare("SELECT COUNT(*) AS n FROM blocked_bots"),
     db.prepare("SELECT COUNT(*) AS n FROM spam_events WHERE ts > ?").bind(since),
+    db.prepare(
+      "SELECT COALESCE(SUM(count), 0) AS sends, COUNT(*) AS bots FROM bot_usage WHERE day = ?"
+    ).bind(yesterday),
+    db.prepare("SELECT COUNT(*) AS n FROM error_log WHERE ts > ?").bind(since),
+    db.prepare("SELECT COUNT(*) AS n FROM spam_events WHERE ts > ? AND ts <= ?").bind(sinceDay, since),
+    db.prepare("SELECT COUNT(*) AS n FROM error_log WHERE ts > ? AND ts <= ?").bind(sinceDay, since),
   ]);
   const u = usageToday.results[0] || {};
+  const y = usageYesterday.results[0] || {};
   return json({
     day: today,
     delivered: Number(stats.results[0]?.delivered ?? 0),
@@ -177,7 +192,182 @@ async function overview(db) {
     keys: Number(keys.results[0]?.n ?? 0),
     blocked: Number(blocked.results[0]?.n ?? 0),
     spam24h: Number(spam.results[0]?.n ?? 0),
+    sendsYesterday: Number(y.sends ?? 0),
+    botsYesterday: Number(y.bots ?? 0),
+    errors24h: Number(errors.results[0]?.n ?? 0),
+    spamPrev24h: Number(spamPrev.results[0]?.n ?? 0),
+    errorsPrev24h: Number(errorsPrev.results[0]?.n ?? 0),
   });
+}
+
+// Charts for the overview: per-day series over the last `days` UTC days (usage
+// rows are kept USAGE_RETENTION_DAYS) and breakdowns of the same window.
+async function analytics(db, env, daysParam) {
+  const days = Math.min(Math.max(parseInt(daysParam, 10) || 14, 1), USAGE_RETENTION_DAYS);
+  const dayList = [];
+  for (let i = days - 1; i >= 0; i--) dayList.push(utcDay(new Date(Date.now() - i * 86400 * 1000)));
+  const from = dayList[0];
+  const fromTs = from + "T00:00:00.000Z";
+  const today = dayList[dayList.length - 1];
+  const settings = await loadSettings(db, env);
+  const limit = parseInt(settings.free_daily_limit, 10);
+
+  const [usageRes, spamRes, errRes, topRes, reasonRes, countryRes, tgErrRes, methodRes, keyRes, refusedRes, limitRes] =
+    await db.batch([
+      db.prepare(
+        `SELECT day, SUM(count) AS sends, SUM(free_count) AS free, COUNT(*) AS bots
+           FROM bot_usage WHERE day >= ? GROUP BY day`
+      ).bind(from),
+      db.prepare(
+        `SELECT substr(ts, 1, 10) AS day, action, COUNT(*) AS n
+           FROM spam_events WHERE ts >= ? GROUP BY day, action`
+      ).bind(fromTs),
+      db.prepare(
+        `SELECT substr(ts, 1, 10) AS day, kind, COUNT(*) AS n
+           FROM error_log WHERE ts >= ? GROUP BY day, kind`
+      ).bind(fromTs),
+      db.prepare(
+        `SELECT u.bot_id, SUM(u.count) AS sends, SUM(u.free_count) AS free,
+                COUNT(*) AS active_days, MAX(u.day) AS last_day,
+                b.bot_id IS NOT NULL AS blocked,
+                (SELECT COUNT(*) FROM spam_events s WHERE s.bot_id = u.bot_id AND s.ts >= ?) AS spam
+           FROM bot_usage u LEFT JOIN blocked_bots b ON b.bot_id = u.bot_id
+          WHERE u.day >= ?
+          GROUP BY u.bot_id ORDER BY sends DESC LIMIT 10`
+      ).bind(fromTs, from),
+      db.prepare("SELECT reasons FROM spam_events WHERE ts >= ? ORDER BY id DESC LIMIT 5000").bind(fromTs),
+      db.prepare(
+        `SELECT COALESCE(country, '??') AS country, COUNT(*) AS n
+           FROM spam_events WHERE ts >= ? GROUP BY country ORDER BY n DESC LIMIT 8`
+      ).bind(fromTs),
+      db.prepare(
+        `SELECT error_code, description, COUNT(*) AS n, COUNT(DISTINCT bot_id) AS bots
+           FROM error_log WHERE ts >= ? AND kind = 'telegram_error'
+          GROUP BY error_code, description ORDER BY n DESC LIMIT 8`
+      ).bind(fromTs),
+      db.prepare(
+        `SELECT COALESCE(method, '(none)') AS method, COUNT(*) AS n
+           FROM error_log WHERE ts >= ? GROUP BY method ORDER BY n DESC LIMIT 8`
+      ).bind(fromTs),
+      db.prepare("SELECT label, prefix, uses, last_used FROM access_keys ORDER BY uses DESC LIMIT 8"),
+      db.prepare("SELECT COALESCE(SUM(hits), 0) AS hits FROM blocked_bots"),
+      // free_count is bumped before the limit check, so anything past the limit
+      // is a request that was refused with 429.
+      Number.isFinite(limit) && limit > 0
+        ? db.prepare(
+            `SELECT COUNT(*) AS bots, COALESCE(SUM(free_count - ?), 0) AS refused
+               FROM bot_usage WHERE day = ? AND free_count > ?`
+          ).bind(limit, today, limit)
+        : db.prepare("SELECT 0 AS bots, 0 AS refused"),
+    ]);
+
+  const byDay = Object.fromEntries(usageRes.results.map((r) => [r.day, r]));
+  const daily = dayList.map((day) => {
+    const r = byDay[day] || {};
+    const sends = Number(r.sends ?? 0);
+    const free = Number(r.free ?? 0);
+    return { day, sends, free, keyed: sends - free, bots: Number(r.bots ?? 0) };
+  });
+
+  const reasons = {};
+  for (const row of reasonRes.results) {
+    for (const reason of String(row.reasons || "").split(", ")) {
+      if (reason) reasons[reason] = (reasons[reason] || 0) + 1;
+    }
+  }
+
+  return json({
+    days: dayList,
+    limit: Number.isFinite(limit) ? limit : null,
+    daily,
+    spamDaily: pivot(dayList, spamRes.results, "action"),
+    errorsDaily: pivot(dayList, errRes.results, "kind"),
+    topBots: topRes.results,
+    spamReasons: Object.entries(reasons)
+      .map(([reason, n]) => ({ reason, n }))
+      .sort((a, b) => b.n - a.n)
+      .slice(0, 8),
+    spamCountries: countryRes.results,
+    telegramErrors: tgErrRes.results,
+    errorMethods: methodRes.results,
+    keys: keyRes.results,
+    blockedHits: Number(refusedRes.results[0]?.hits ?? 0),
+    limitBotsToday: Number(limitRes.results[0]?.bots ?? 0),
+    limitRefusedToday: Number(limitRes.results[0]?.refused ?? 0),
+  });
+}
+
+// Rows of { day, <key>, n } -> { keys: [...], rows: [{ day, total, [key]: n }] }.
+function pivot(dayList, rows, key) {
+  const keys = [...new Set(rows.map((r) => r[key] || "unknown"))].sort();
+  const map = Object.fromEntries(dayList.map((day) => [day, { day, total: 0 }]));
+  for (const r of rows) {
+    const row = map[r.day];
+    if (!row) continue;
+    const k = r[key] || "unknown";
+    row[k] = (row[k] || 0) + Number(r.n);
+    row.total += Number(r.n);
+  }
+  return { keys, rows: dayList.map((day) => map[day]) };
+}
+
+async function botDetail(db, botId) {
+  if (!/^\d{1,20}$/.test(botId || "")) return json({ error: "Bad bot id." }, 400);
+  const [usageRes, blockedRes, spamRes, errRes, totalsRes] = await db.batch([
+    db.prepare("SELECT day, count, free_count FROM bot_usage WHERE bot_id = ? ORDER BY day").bind(botId),
+    db.prepare("SELECT reason, created_at, hits, last_seen FROM blocked_bots WHERE bot_id = ?").bind(botId),
+    db.prepare(
+      "SELECT ts, method, chat_id, score, reasons, text, action, ip, country FROM spam_events WHERE bot_id = ? ORDER BY id DESC LIMIT 20"
+    ).bind(botId),
+    db.prepare(
+      "SELECT ts, kind, status, method, error_code, description, message, country FROM error_log WHERE bot_id = ? ORDER BY id DESC LIMIT 20"
+    ).bind(botId),
+    db.prepare(
+      `SELECT (SELECT COUNT(*) FROM spam_events WHERE bot_id = ?1) AS spam,
+              (SELECT COUNT(*) FROM error_log WHERE bot_id = ?1) AS errors,
+              (SELECT COUNT(DISTINCT chat_id) FROM spam_events WHERE bot_id = ?1) AS spam_chats`
+    ).bind(botId),
+  ]);
+  const byDay = Object.fromEntries(usageRes.results.map((r) => [r.day, r]));
+  const daily = [];
+  for (let i = USAGE_RETENTION_DAYS - 1; i >= 0; i--) {
+    const day = utcDay(new Date(Date.now() - i * 86400 * 1000));
+    const r = byDay[day] || {};
+    const sends = Number(r.count ?? 0);
+    const free = Number(r.free_count ?? 0);
+    daily.push({ day, sends, free, keyed: sends - free });
+  }
+  return json({
+    bot_id: botId,
+    daily,
+    blocked: blockedRes.results[0] || null,
+    spam: spamRes.results,
+    errors: errRes.results,
+    totals: totalsRes.results[0] || {},
+  });
+}
+
+async function listErrors(db, kind, botId) {
+  const where = [];
+  const binds = [];
+  if (kind) {
+    where.push("kind = ?");
+    binds.push(kind);
+  }
+  if (botId) {
+    where.push("bot_id = ?");
+    binds.push(botId);
+  }
+  const { results } = await db
+    .prepare(
+      `SELECT id, ts, kind, status, method, bot_id, error_code, description, message, ip, country, city, org, colo
+         FROM error_log ${where.length ? "WHERE " + where.join(" AND ") : ""}
+        ORDER BY id DESC LIMIT 200`
+    )
+    .bind(...binds)
+    .all();
+  const kinds = await db.prepare("SELECT kind, COUNT(*) AS n FROM error_log GROUP BY kind ORDER BY n DESC").all();
+  return json({ errors: results, kinds: kinds.results });
 }
 
 async function usage(db, day) {

@@ -92,6 +92,66 @@
       .notice.err { border-color: rgba(248, 81, 73, 0.6); color: #ffb4ae; }
       .newkey { background: var(--panel-2); border: 1px dashed var(--accent); padding: 12px; border-radius: 8px; word-break: break-all; }
 
+      /* Charts. Series colors are fixed per entity (validated for this dark surface). */
+      .head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+      .head-row .sub { margin: 0; }
+      .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; padding: 2px; background: var(--panel-2); }
+      .seg button { background: none; border: 0; color: var(--muted); font: inherit; font-size: 0.82rem; padding: 4px 10px; border-radius: 6px; cursor: pointer; }
+      .seg button.active { background: var(--panel); color: var(--text); box-shadow: 0 0 0 1px var(--border); }
+      .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); gap: 16px; }
+      .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+      .grid2 > .panel, .grid3 > .panel { margin-bottom: 0; min-width: 0; }
+      .grid2, .grid3 { margin-bottom: 16px; }
+      .card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 10px; }
+      h3 { font-size: 0.95rem; margin: 0; }
+      .card-head .hint { color: var(--muted); font-size: 0.8rem; }
+      .chart { position: relative; width: 100%; min-height: 40px; }
+      .chart svg { display: block; overflow: visible; }
+      .chart .grid { stroke: #1d252f; stroke-width: 1; shape-rendering: crispEdges; }
+      .chart .axis { stroke: #2c3643; stroke-width: 1; shape-rendering: crispEdges; }
+      .chart text { fill: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+      .chart .hover-band { fill: rgba(255, 255, 255, 0.04); }
+      .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.8rem; color: var(--muted); }
+      .legend span { display: inline-flex; align-items: center; gap: 6px; }
+      .sw { width: 10px; height: 10px; border-radius: 3px; display: inline-block; flex: none; }
+      details.data { margin-top: 8px; font-size: 0.82rem; }
+      details.data summary { color: var(--muted); cursor: pointer; }
+      details.data table { margin-top: 6px; }
+      .chart-empty { color: var(--muted); font-size: 0.88rem; padding: 24px 0; text-align: center; }
+
+      .tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+      .tile .delta { font-size: 0.78rem; color: var(--muted); }
+      .tile .delta.good { color: var(--green); }
+      .tile .delta.bad { color: var(--red); }
+      .tile svg.spark { margin-top: 6px; width: 100%; height: 28px; display: block; }
+
+      .hbars { display: flex; flex-direction: column; gap: 8px; }
+      .hbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 0.86rem; }
+      .hbar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .hbar .val { text-align: right; font-variant-numeric: tabular-nums; color: var(--text); }
+      .hbar .val small { color: var(--muted); margin-left: 6px; }
+      .hbar .track { grid-column: 1 / -1; height: 8px; }
+      .hbar .fill { height: 8px; border-radius: 0 4px 4px 0; background: #3987e5; min-width: 2px; }
+
+      #tip {
+        position: fixed; z-index: 50; pointer-events: none; background: #1a212b; border: 1px solid var(--border);
+        border-radius: 8px; padding: 8px 10px; font-size: 0.8rem; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4); min-width: 140px;
+      }
+      #tip .t { font-weight: 600; margin-bottom: 4px; }
+      #tip .r { display: flex; align-items: center; gap: 6px; justify-content: space-between; }
+      #tip .r > span:first-child { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); }
+      #tip .r b { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+      button.link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; }
+      button.link:hover { text-decoration: underline; }
+      dialog#bot-dialog {
+        background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 12px;
+        width: min(920px, calc(100vw - 32px)); max-height: calc(100vh - 48px); padding: 20px; overflow: auto;
+      }
+      dialog#bot-dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+      .bd-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+      .bd-head h2 { margin: 0 auto 0 0; }
+
       #login { max-width: 360px; margin: 12vh auto; }
       #login input { width: 100%; margin-bottom: 10px; }
       #login button { width: 100%; }
@@ -119,6 +179,7 @@
             <button data-tab="bots">Bots</button>
             <button data-tab="blocked">Blocked</button>
             <button data-tab="spam">Spam</button>
+            <button data-tab="errors">Errors</button>
             <button data-tab="keys">Access keys</button>
             <button data-tab="settings">Settings</button>
           </nav>
@@ -129,9 +190,74 @@
         <div id="flash" class="notice" hidden></div>
 
         <section data-view="overview">
-          <h2>Overview</h2>
-          <p class="sub">Today is <span id="ov-day"></span> (UTC). Daily counters reset at UTC midnight.</p>
+          <div class="head-row">
+            <div>
+              <h2>Overview</h2>
+              <p class="sub">Today is <span id="ov-day"></span> (UTC). Daily counters reset at UTC midnight. <span id="ov-updated"></span></p>
+            </div>
+            <div class="row">
+              <div class="seg" id="range" role="group" aria-label="Chart range">
+                <button data-days="7">7 days</button>
+                <button data-days="14">14 days</button>
+                <button data-days="30">30 days</button>
+              </div>
+              <button class="btn ghost small" id="ov-refresh">Refresh</button>
+            </div>
+          </div>
           <div class="tiles" id="ov-tiles"></div>
+
+          <div class="panel">
+            <div class="card-head"><h3>send* calls per day</h3><div class="legend" id="lg-sends"></div></div>
+            <div class="chart" id="ch-sends"></div>
+          </div>
+
+          <div class="grid2">
+            <div class="panel">
+              <div class="card-head"><h3>Active bots per day</h3><span class="hint">bots with at least one send* call</span></div>
+              <div class="chart" id="ch-bots"></div>
+            </div>
+            <div class="panel">
+              <div class="card-head"><h3>Top bots</h3><span class="hint">send* calls in range · click for details</span></div>
+              <div id="top-bots"></div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="panel">
+              <div class="card-head"><h3>Spam detections per day</h3><div class="legend" id="lg-spam"></div></div>
+              <div class="chart" id="ch-spam"></div>
+            </div>
+            <div class="panel">
+              <div class="card-head"><h3>What the spam matched</h3><span class="hint">detections per rule, in range</span></div>
+              <div id="spam-reasons"></div>
+            </div>
+          </div>
+
+          <div class="grid2">
+            <div class="panel">
+              <div class="card-head"><h3>Errors per day</h3><div class="legend" id="lg-errors"></div></div>
+              <div class="chart" id="ch-errors"></div>
+            </div>
+            <div class="panel">
+              <div class="card-head"><h3>Top Telegram errors</h3><span class="hint">replies Telegram rejected, in range</span></div>
+              <div class="table-wrap"><table id="tg-errors"></table></div>
+            </div>
+          </div>
+
+          <div class="grid3">
+            <div class="panel">
+              <div class="card-head"><h3>Spam by caller country</h3></div>
+              <div id="spam-countries"></div>
+            </div>
+            <div class="panel">
+              <div class="card-head"><h3>Errors by method</h3></div>
+              <div id="error-methods"></div>
+            </div>
+            <div class="panel">
+              <div class="card-head"><h3>Access keys by use</h3><span class="hint">all time</span></div>
+              <div id="key-usage"></div>
+            </div>
+          </div>
         </section>
 
         <section data-view="bots" hidden>
@@ -163,6 +289,17 @@
             <button class="btn ghost small" id="spam-refresh">Refresh</button>
           </div>
           <div class="panel table-wrap"><table id="spam-table"></table></div>
+        </section>
+
+        <section data-view="errors" hidden>
+          <h2>Error log</h2>
+          <p class="sub">Proxy failures and Telegram's own rejections, with the caller's metadata. Latest 200. Bot tokens are never stored.</p>
+          <div class="row" style="margin-bottom: 12px">
+            <select id="err-kind"><option value="">All kinds</option></select>
+            <input id="err-bot" placeholder="Filter by bot id" />
+            <button class="btn ghost small" id="err-refresh">Refresh</button>
+          </div>
+          <div class="panel table-wrap"><table id="errors-table"></table></div>
         </section>
 
         <section data-view="keys" hidden>
@@ -230,6 +367,30 @@
         </section>
       </main>
     </div>
+
+    <dialog id="bot-dialog">
+      <div class="bd-head">
+        <h2>Bot <code id="bd-id"></code></h2>
+        <span id="bd-status"></span>
+        <span id="bd-action"></span>
+        <button class="btn ghost small" id="bd-close" type="button">Close</button>
+      </div>
+      <div class="tiles" id="bd-tiles"></div>
+      <div class="panel">
+        <div class="card-head"><h3>send* calls, last 30 days</h3><div class="legend" id="lg-bd"></div></div>
+        <div class="chart" id="ch-bd"></div>
+      </div>
+      <div class="panel">
+        <div class="card-head"><h3>Recent spam detections</h3></div>
+        <div class="table-wrap"><table id="bd-spam"></table></div>
+      </div>
+      <div class="panel" style="margin-bottom: 0">
+        <div class="card-head"><h3>Recent errors</h3></div>
+        <div class="table-wrap"><table id="bd-errors"></table></div>
+      </div>
+    </dialog>
+
+    <div id="tip" hidden></div>
 
     <script>
       const $ = (sel) => document.querySelector(sel);
@@ -299,6 +460,302 @@
       const fmtNum = (n) => Number(n || 0).toLocaleString();
       const btn = (text, cls, onclick) => el("button", { class: "btn small " + cls, text, type: "button", onclick });
 
+      // ---- charts (hand-built SVG, no dependencies) ----------------------------
+
+      // Categorical slots in fixed order; each entity keeps its slot in every chart.
+      const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9", "#e66767"];
+      const SURFACE = "#11161d";
+      const LABELS = {
+        keyed: "with access key", free: "without key",
+        log: "alerted, delivered", drop: "dropped", block_bot: "dropped + bot blocked",
+        telegram_error: "Telegram rejected", upstream_unreachable: "Telegram unreachable",
+        log_delivery_failed: "log delivery failed", stat_write_failed: "stat write failed",
+        access_check_failed: "access check failed",
+      };
+      const ORDER = {
+        spam: ["log", "drop", "block_bot"],
+        errors: ["telegram_error", "upstream_unreachable", "log_delivery_failed", "stat_write_failed", "access_check_failed"],
+      };
+      const label = (k) => LABELS[k] || k;
+      function seriesFor(keys, order) {
+        const all = [...order, ...keys.filter((k) => !order.includes(k)).sort()];
+        return all
+          .filter((k) => keys.includes(k))
+          .map((k) => ({ key: k, label: label(k), color: SERIES[Math.min(all.indexOf(k), SERIES.length - 1)] }));
+      }
+
+      const NS = "http://www.w3.org/2000/svg";
+      function svg(tag, attrs = {}) {
+        const node = document.createElementNS(NS, tag);
+        for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+        return node;
+      }
+      const fmtDay = (day, long) =>
+        new Date(day + "T00:00:00Z").toLocaleDateString(undefined, {
+          month: "short", day: "numeric", timeZone: "UTC", ...(long ? { weekday: "short" } : {}),
+        });
+      const fmtShort = (n) => (n >= 1e6 ? +(n / 1e6).toFixed(1) + "M" : n >= 1e4 ? +(n / 1e3).toFixed(1) + "k" : n.toLocaleString());
+
+      // A clean axis: 0..max in about four round steps.
+      function niceScale(max, count = 4) {
+        if (!(max > 0)) return { max: 1, step: 1 };
+        const raw = max / count;
+        const p = 10 ** Math.floor(Math.log10(raw));
+        const m = raw / p;
+        const step = Math.max(1, (m <= 1 ? 1 : m <= 2 ? 2 : m <= 5 ? 5 : 10) * p);
+        return { max: Math.ceil(max / step) * step, step };
+      }
+
+      // Column with a 4px rounded data end, square at the baseline.
+      function colPath(x, y, w, h, r) {
+        r = Math.min(r, w / 2, h);
+        return `M${x},${y + h}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + h}Z`;
+      }
+
+      const tip = $("#tip");
+      function showTip(evt, title, rows) {
+        tip.replaceChildren(
+          el("div", { class: "t", text: title }),
+          ...rows.map((r) =>
+            el("div", { class: "r" }, [
+              el("span", {}, [r.color ? el("i", { class: "sw", style: "background:" + r.color }) : null, r.label]),
+              el("b", { text: r.value }),
+            ])
+          )
+        );
+        tip.hidden = false;
+        const pad = 14, w = tip.offsetWidth, h = tip.offsetHeight;
+        let x = evt.clientX + pad, y = evt.clientY + pad;
+        if (x + w > innerWidth - 8) x = evt.clientX - w - pad;
+        if (y + h > innerHeight - 8) y = evt.clientY - h - pad;
+        tip.style.left = Math.max(8, x) + "px";
+        tip.style.top = Math.max(8, y) + "px";
+      }
+      const hideTip = () => (tip.hidden = true);
+
+      function renderLegend(target, series) {
+        if (!target) return;
+        target.replaceChildren(
+          ...(series.length > 1
+            ? series.map((x) => el("span", {}, [el("i", { class: "sw", style: "background:" + x.color }), x.label]))
+            : [])
+        );
+      }
+
+      // Shared frame for day-indexed charts: gridlines, y ticks, x labels.
+      function frame(target, rows, max, step, height) {
+        const W = Math.max(target.clientWidth || 0, 260), H = height;
+        const m = { t: 8, r: 4, b: 22, l: 40 };
+        const iw = W - m.l - m.r, ih = H - m.t - m.b;
+        const root = svg("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}` });
+        const y = (v) => m.t + ih - (v / max) * ih;
+        for (let v = 0; v <= max + 1e-9; v += step) {
+          root.append(svg("line", { class: v === 0 ? "axis" : "grid", x1: m.l, x2: W - m.r, y1: y(v), y2: y(v) }));
+          const t = svg("text", { x: m.l - 8, y: y(v) + 4, "text-anchor": "end" });
+          t.textContent = fmtShort(v);
+          root.append(t);
+        }
+        const band = iw / rows.length;
+        const every = Math.max(1, Math.ceil(rows.length / Math.max(1, Math.floor(iw / 56))));
+        rows.forEach((r, i) => {
+          if ((rows.length - 1 - i) % every) return;
+          const t = svg("text", { x: m.l + band * (i + 0.5), y: H - 6, "text-anchor": "middle" });
+          t.textContent = fmtDay(r.day);
+          root.append(t);
+        });
+        return { root, m, iw, ih, band, y };
+      }
+
+      function dataTable(rows, series, withTotal) {
+        const cols = [{ label: "Day", render: (r) => fmtDay(r.day, true) },
+          ...series.map((x) => ({ label: x.label, num: true, render: (r) => fmtNum(r[x.key]) }))];
+        if (withTotal) cols.push({ label: "Total", num: true, render: (r) => fmtNum(series.reduce((s, x) => s + (r[x.key] || 0), 0)) });
+        const table = el("table");
+        renderTable(table, cols, rows.slice().reverse(), "");
+        return el("details", { class: "data" }, [el("summary", { text: "Show data" }), el("div", { class: "table-wrap" }, table)]);
+      }
+
+      // Stacked columns, one per day, with a 2px surface gap between segments.
+      function columnChart(target, rows, series, opts = {}) {
+        target.replaceChildren();
+        const totals = rows.map((r) => series.reduce((s, x) => s + (r[x.key] || 0), 0));
+        if (!totals.some(Boolean)) {
+          target.append(el("div", { class: "chart-empty", text: opts.empty || "Nothing recorded in this range." }));
+          return;
+        }
+        const { max, step } = niceScale(Math.max(...totals));
+        const f = frame(target, rows, max, step, opts.height || 200);
+        const bw = Math.min(24, Math.max(3, f.band * 0.62));
+        rows.forEach((r, i) => {
+          const g = svg("g");
+          const x0 = f.m.l + f.band * i;
+          const hover = svg("rect", { class: "hover-band", x: x0, y: f.m.t, width: f.band, height: f.ih, opacity: 0 });
+          g.append(hover);
+          const segs = series.filter((x) => r[x.key] > 0);
+          let base = f.y(0);
+          segs.forEach((x, j) => {
+            const h = (r[x.key] / max) * f.ih;
+            const gap = j > 0 ? 2 : 0;
+            const hh = Math.max(h - gap, 1);
+            const top = base - gap - hh;
+            g.append(svg("path", { d: colPath(x0 + (f.band - bw) / 2, top, bw, hh, j === segs.length - 1 ? 4 : 0), fill: x.color }));
+            base -= h;
+          });
+          const rowsTip = series.map((x) => ({ label: x.label, color: series.length > 1 ? x.color : null, value: fmtNum(r[x.key]) }));
+          if (series.length > 1) rowsTip.push({ label: "Total", value: fmtNum(totals[i]) });
+          g.addEventListener("mousemove", (e) => { hover.setAttribute("opacity", 1); showTip(e, fmtDay(r.day, true), rowsTip); });
+          g.addEventListener("mouseleave", () => { hover.setAttribute("opacity", 0); hideTip(); });
+          f.root.append(g);
+        });
+        target.append(f.root, dataTable(rows, series, series.length > 1));
+      }
+
+      // Single-series line with a 10% area wash and a hover crosshair.
+      function lineChart(target, rows, key, opts = {}) {
+        target.replaceChildren();
+        const vals = rows.map((r) => r[key] || 0);
+        if (!vals.some(Boolean)) {
+          target.append(el("div", { class: "chart-empty", text: opts.empty || "Nothing recorded in this range." }));
+          return;
+        }
+        const color = SERIES[0];
+        const { max, step } = niceScale(Math.max(...vals));
+        const f = frame(target, rows, max, step, opts.height || 200);
+        const px = (i) => f.m.l + f.band * (i + 0.5);
+        const pts = vals.map((v, i) => [px(i), f.y(v)]);
+        const line = pts.map((p, i) => (i ? "L" : "M") + p[0] + "," + p[1]).join("");
+        f.root.append(
+          svg("path", { d: `${line}L${pts.at(-1)[0]},${f.y(0)}L${pts[0][0]},${f.y(0)}Z`, fill: color, "fill-opacity": 0.1 }),
+          svg("path", { d: line, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round" })
+        );
+        const end = pts.at(-1);
+        f.root.append(svg("circle", { cx: end[0], cy: end[1], r: 4, fill: color, stroke: SURFACE, "stroke-width": 2 }));
+        const cross = svg("line", { class: "axis", y1: f.m.t, y2: f.m.t + f.ih, opacity: 0 });
+        const dot = svg("circle", { r: 4, fill: color, stroke: SURFACE, "stroke-width": 2, opacity: 0 });
+        const hit = svg("rect", { x: f.m.l, y: f.m.t, width: f.iw, height: f.ih, fill: "transparent" });
+        f.root.append(cross, dot, hit);
+        hit.addEventListener("mousemove", (e) => {
+          const box = f.root.getBoundingClientRect();
+          const i = Math.max(0, Math.min(rows.length - 1, Math.floor((e.clientX - box.left - f.m.l) / f.band)));
+          cross.setAttribute("x1", pts[i][0]); cross.setAttribute("x2", pts[i][0]); cross.setAttribute("opacity", 1);
+          dot.setAttribute("cx", pts[i][0]); dot.setAttribute("cy", pts[i][1]); dot.setAttribute("opacity", 1);
+          showTip(e, fmtDay(rows[i].day, true), [{ label: opts.label || key, value: fmtNum(vals[i]) }]);
+        });
+        hit.addEventListener("mouseleave", () => { cross.setAttribute("opacity", 0); dot.setAttribute("opacity", 0); hideTip(); });
+        target.append(f.root, dataTable(rows, [{ key, label: opts.label || key }], false));
+      }
+
+      // Ranked horizontal bars, directly labeled (HTML, so long names ellipsize).
+      function hbars(target, items, opts = {}) {
+        target.replaceChildren();
+        if (!items.length) {
+          target.append(el("div", { class: "chart-empty", text: opts.empty || "Nothing recorded in this range." }));
+          return;
+        }
+        const max = Math.max(...items.map((i) => i.value), 1);
+        const total = opts.total ?? items.reduce((s, i) => s + i.value, 0);
+        target.append(
+          el("div", { class: "hbars" }, items.map((i) =>
+            el("div", { class: "hbar" }, [
+              el("div", { class: "name" }, i.name instanceof Node ? i.name : document.createTextNode(i.name)),
+              el("div", { class: "val" }, [
+                document.createTextNode(fmtNum(i.value)),
+                total ? el("small", { text: ((i.value / total) * 100).toFixed(i.value / total < 0.1 ? 1 : 0) + "%" }) : null,
+              ]),
+              el("div", { class: "track" }, el("div", { class: "fill", style: `width:${(i.value / max) * 100}%` })),
+            ])
+          ))
+        );
+      }
+
+      function sparkline(values, color = SERIES[0]) {
+        const W = 160, H = 28;
+        const root = svg("svg", { class: "spark", viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", "aria-hidden": "true" });
+        if (values.length < 2) return root;
+        const max = Math.max(...values, 1);
+        const pts = values.map((v, i) => [(i / (values.length - 1)) * (W - 4) + 2, H - 3 - (v / max) * (H - 6)]);
+        const d = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + "," + p[1].toFixed(1)).join("");
+        root.append(
+          svg("path", { d: `${d}L${W - 2},${H}L2,${H}Z`, fill: color, "fill-opacity": 0.1 }),
+          svg("path", { d, fill: "none", stroke: color, "stroke-width": 2, "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" })
+        );
+        return root;
+      }
+
+      // "▲ 12% vs yesterday". `upIsBad` colors the change; the arrow and words carry it too.
+      function delta(now, before, words, upIsBad) {
+        if (!before && !now) return el("div", { class: "delta", text: "no change " + words });
+        if (!before) return el("div", { class: "delta", text: "new " + words });
+        const pct = ((now - before) / before) * 100;
+        if (Math.abs(pct) < 0.5) return el("div", { class: "delta", text: "flat " + words });
+        const up = pct > 0;
+        const cls = upIsBad === undefined ? "" : up === upIsBad ? "bad" : "good";
+        return el("div", { class: "delta " + cls, text: (up ? "▲ " : "▼ ") + Math.abs(pct).toFixed(0) + "% " + words });
+      }
+
+      function tile(value, labelText, extra = []) {
+        return el("div", { class: "tile" }, [el("div", { class: "v", text: value }), el("div", { class: "l", text: labelText }), ...extra]);
+      }
+
+      const botLink = (id) => (id ? el("button", { class: "link mono", type: "button", text: id, onclick: () => openBot(id) }) : "—");
+
+      // ---- bot detail ------------------------------------------------------------
+
+      const dialog = $("#bot-dialog");
+      let openBotId = null;
+      async function openBot(botId) {
+        openBotId = botId;
+        $("#bd-id").textContent = botId;
+        ["#bd-tiles", "#bd-spam", "#bd-errors", "#ch-bd", "#bd-status", "#bd-action"].forEach((s) => $(s).replaceChildren());
+        if (!dialog.open) dialog.showModal();
+        let d;
+        try { d = await api("bot/" + encodeURIComponent(botId)); } catch (e) { flash(e.message); dialog.close(); return; }
+        if (openBotId !== botId) return;
+        const total = d.daily.reduce((s, r) => s + r.sends, 0);
+        const free = d.daily.reduce((s, r) => s + r.free, 0);
+        const active = d.daily.filter((r) => r.sends).length;
+        const today = d.daily.at(-1);
+        $("#bd-status").replaceChildren(el("span", { class: "tag " + (d.blocked ? "red" : "green"), text: d.blocked ? "blocked" : "active" }));
+        $("#bd-action").replaceChildren(
+          d.blocked ? btn("Unblock", "ghost", () => unblock(botId)) : btn("Block", "danger", () => blockBotPrompt(botId, d.totals.spam ? "spam" : ""))
+        );
+        $("#bd-tiles").replaceChildren(
+          tile(fmtNum(today.sends), "send* calls today"),
+          tile(fmtNum(total), "send* calls, 30 days"),
+          tile(total ? Math.round((free / total) * 100) + "%" : "—", "without a key, 30 days"),
+          tile(fmtNum(active), "active days of 30"),
+          tile(fmtNum(d.totals.spam), "spam detections", [el("div", { class: "delta", text: fmtNum(d.totals.spam_chats) + " chats targeted" })]),
+          tile(fmtNum(d.totals.errors), "logged errors"),
+          ...(d.blocked ? [tile(fmtNum(d.blocked.hits), "refused since blocked", [el("div", { class: "delta", text: d.blocked.reason || "no reason given" })])] : [])
+        );
+        const series = [{ key: "keyed", label: label("keyed"), color: SERIES[0] }, { key: "free", label: label("free"), color: SERIES[1] }];
+        renderLegend($("#lg-bd"), series);
+        columnChart($("#ch-bd"), d.daily, series, { height: 180, empty: "No send* calls in the last 30 days." });
+        renderTable($("#bd-spam"), [
+          { label: "Time", render: (r) => fmtTime(r.ts) },
+          { label: "Chat", render: (r) => el("code", { text: r.chat_id || "—" }) },
+          { label: "Message", render: (r) => el("div", { class: "msg", text: r.text || "(no text)" }) },
+          { label: "Matched", render: (r) => r.score + ": " + (r.reasons || "") },
+          { label: "Action", render: (r) => label(r.action) },
+        ], d.spam, "No spam detected for this bot.");
+        renderTable($("#bd-errors"), errorColumns(false), d.errors, "No errors logged for this bot.");
+      }
+      $("#bd-close").addEventListener("click", () => dialog.close());
+      dialog.addEventListener("close", () => { openBotId = null; hideTip(); });
+      dialog.addEventListener("click", (e) => e.target === dialog && dialog.close());
+
+      function errorColumns(withBot) {
+        return [
+          { label: "Time", render: (r) => fmtTime(r.ts) },
+          { label: "Kind", render: (r) => el("span", { class: "tag " + (r.kind === "telegram_error" ? "yellow" : "red"), text: label(r.kind) }) },
+          { label: "Status", num: true, render: (r) => r.status ?? "—" },
+          { label: "Method", render: (r) => (r.method ? el("code", { text: r.method }) : "—") },
+          ...(withBot ? [{ label: "Bot id", render: (r) => botLink(r.bot_id) }] : []),
+          { label: "Detail", render: (r) => el("div", { class: "msg", text: [r.error_code, r.description || r.message].filter(Boolean).join(": ") || "—" }) },
+          { label: "Caller", render: (r) => [r.country, r.city, r.org].filter(Boolean).join(" · ") || "—" },
+        ];
+      }
+
       async function blockBotPrompt(botId, defaultReason) {
         const reason = prompt("Block bot " + botId + "? Reason (optional):", defaultReason || "");
         if (reason === null) return;
@@ -306,6 +763,7 @@
           await api("blocked", { method: "POST", body: { bot_id: botId, reason } });
           flash("Bot " + botId + " blocked.", true);
           load(current);
+          if (openBotId === botId) openBot(botId);
         } catch (e) { flash(e.message); }
       }
 
@@ -314,27 +772,42 @@
           await api("blocked/" + encodeURIComponent(botId), { method: "DELETE" });
           flash("Bot " + botId + " unblocked.", true);
           load(current);
+          if (openBotId === botId) openBot(botId);
         } catch (e) { flash(e.message); }
       }
 
       const views = {
         async overview() {
-          const d = await api("overview");
+          const [d, a] = await Promise.all([api("overview"), api("analytics?days=" + range)]);
+          lastAnalytics = a;
           $("#ov-day").textContent = d.day;
+          $("#ov-updated").textContent = "Updated " + new Date().toLocaleTimeString() + ".";
+          document.querySelectorAll("#range button").forEach((b) => b.classList.toggle("active", Number(b.dataset.days) === range));
           const total = d.delivered + d.errors;
-          const tiles = [
-            [fmtNum(d.sendsToday), "send* calls today"],
-            [fmtNum(d.freeSendsToday), "without a key today"],
-            [fmtNum(d.botsToday), "active bots today"],
-            [fmtNum(d.spam24h), "spam detections, 24h"],
-            [fmtNum(d.blocked), "blocked bots"],
-            [fmtNum(d.keys), "access keys"],
-            [fmtNum(d.delivered), "delivered, all time"],
-            [total ? ((d.errors / total) * 100).toFixed(2) + "%" : "0%", "proxy error rate"],
-          ];
+          const sends = a.daily.map((r) => r.sends);
+          const spamDays = a.spamDaily.rows.map((r) => r.total);
+          const errDays = a.errorsDaily.rows.map((r) => r.total);
           $("#ov-tiles").replaceChildren(
-            ...tiles.map(([v, l]) => el("div", { class: "tile" }, [el("div", { class: "v", text: v }), el("div", { class: "l", text: l })]))
+            tile(fmtNum(d.sendsToday), "send* calls today", [delta(d.sendsToday, d.sendsYesterday, "vs yesterday"), sparkline(sends)]),
+            tile(fmtNum(d.botsToday), "active bots today", [delta(d.botsToday, d.botsYesterday, "vs yesterday"), sparkline(a.daily.map((r) => r.bots))]),
+            tile(
+              d.sendsToday ? Math.round((d.freeSendsToday / d.sendsToday) * 100) + "%" : "—",
+              "of today's calls without a key",
+              [el("div", { class: "delta", text: fmtNum(d.freeSendsToday) + " free calls" }), sparkline(a.daily.map((r) => r.free), SERIES[1])]
+            ),
+            tile(fmtNum(d.spam24h), "spam detections, 24h", [delta(d.spam24h, d.spamPrev24h, "vs previous 24h", true), sparkline(spamDays, SERIES[1])]),
+            tile(fmtNum(d.errors24h), "errors logged, 24h", [delta(d.errors24h, d.errorsPrev24h, "vs previous 24h", true), sparkline(errDays, SERIES[1])]),
+            tile(
+              a.limit === null ? "off" : fmtNum(a.limitRefusedToday),
+              a.limit === null ? "daily limit (unlimited)" : "refused by daily limit, today",
+              [el("div", { class: "delta", text: a.limit === null ? "no free-tier cap" : fmtNum(a.limitBotsToday) + (a.limitBotsToday === 1 ? " bot" : " bots") + " over " + fmtNum(a.limit) + "/day" })]
+            ),
+            tile(fmtNum(d.blocked), "blocked bots", [el("div", { class: "delta", text: fmtNum(a.blockedHits) + " requests refused" })]),
+            tile(fmtNum(d.keys), "access keys"),
+            tile(fmtNum(d.delivered), "delivered, all time"),
+            tile(total ? ((d.errors / total) * 100).toFixed(2) + "%" : "0%", "proxy error rate, all time", [el("div", { class: "delta", text: fmtNum(d.errors) + " unreachable" })])
           );
+          renderCharts();
         },
 
         async bots() {
@@ -342,7 +815,7 @@
           if (!input.value) input.value = new Date().toISOString().slice(0, 10);
           const d = await api("usage?day=" + input.value);
           renderTable($("#bots-table"), [
-            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "Bot id", render: (r) => botLink(r.bot_id) },
             { label: "send* calls", num: true, render: (r) => fmtNum(r.count) },
             { label: "Free", num: true, render: (r) => fmtNum(r.free_count) },
             { label: "Spam flags", num: true, render: (r) => r.spam ? el("span", { class: "tag yellow", text: fmtNum(r.spam) }) : "0" },
@@ -351,10 +824,25 @@
           ], d.bots, "No send* calls on this day.");
         },
 
+        async errors() {
+          const kind = $("#err-kind").value;
+          const bot = $("#err-bot").value.trim();
+          const q = new URLSearchParams();
+          if (kind) q.set("kind", kind);
+          if (bot) q.set("bot", bot);
+          const d = await api("errors?" + q);
+          $("#err-kind").replaceChildren(
+            el("option", { value: "", text: "All kinds" }),
+            ...d.kinds.map((k) => el("option", { value: k.kind, text: label(k.kind) + " (" + fmtNum(k.n) + ")" }))
+          );
+          $("#err-kind").value = kind;
+          renderTable($("#errors-table"), errorColumns(true), d.errors, "No errors logged.");
+        },
+
         async blocked() {
           const d = await api("blocked");
           renderTable($("#blocked-table"), [
-            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "Bot id", render: (r) => botLink(r.bot_id) },
             { label: "Reason", key: "reason" },
             { label: "Blocked", render: (r) => fmtTime(r.created_at) },
             { label: "Refused requests", num: true, render: (r) => fmtNum(r.hits) },
@@ -368,11 +856,11 @@
           const d = await api("spam" + (bot ? "?bot=" + encodeURIComponent(bot) : ""));
           renderTable($("#spam-table"), [
             { label: "Time", render: (r) => fmtTime(r.ts) },
-            { label: "Bot id", render: (r) => el("code", { text: r.bot_id }) },
+            { label: "Bot id", render: (r) => botLink(r.bot_id) },
             { label: "Chat", render: (r) => el("code", { text: r.chat_id || "—" }) },
             { label: "Message", render: (r) => el("div", { class: "msg", text: r.text || "(no text)" }) },
             { label: "Matched", render: (r) => r.score + ": " + (r.reasons || "") },
-            { label: "Action", key: "action" },
+            { label: "Action", render: (r) => label(r.action) },
             { label: "Caller", render: (r) => [r.ip, r.country].filter(Boolean).join(" · ") },
             { label: "", render: (r) => btn("Block bot", "danger", () => blockBotPrompt(r.bot_id, "spam")) },
           ], d.events, "No spam detected yet.");
@@ -410,6 +898,61 @@
           }
         },
       };
+
+      let range = 14;
+      try { range = [7, 14, 30].includes(Number(localStorage.getItem("tgp_range"))) ? Number(localStorage.getItem("tgp_range")) : 14; } catch {}
+      let lastAnalytics = null;
+
+      // Charts are drawn at the container's width, so they are redrawn on resize.
+      function renderCharts() {
+        const a = lastAnalytics;
+        if (!a) return;
+        const sendSeries = [{ key: "keyed", label: label("keyed"), color: SERIES[0] }, { key: "free", label: label("free"), color: SERIES[1] }];
+        renderLegend($("#lg-sends"), sendSeries);
+        columnChart($("#ch-sends"), a.daily, sendSeries, { height: 220, empty: "No send* calls in this range." });
+        lineChart($("#ch-bots"), a.daily, "bots", { label: "active bots", empty: "No active bots in this range." });
+
+        const spamSeries = seriesFor(a.spamDaily.keys, ORDER.spam);
+        renderLegend($("#lg-spam"), spamSeries);
+        columnChart($("#ch-spam"), a.spamDaily.rows, spamSeries, { empty: "No spam detected in this range." });
+        const errSeries = seriesFor(a.errorsDaily.keys, ORDER.errors);
+        renderLegend($("#lg-errors"), errSeries);
+        columnChart($("#ch-errors"), a.errorsDaily.rows, errSeries, { empty: "No errors logged in this range." });
+
+        const rangeSends = a.daily.reduce((s, r) => s + r.sends, 0);
+        hbars($("#top-bots"), a.topBots.map((b) => ({
+          name: el("span", {}, [
+            botLink(b.bot_id),
+            b.blocked ? el("span", { class: "tag red", text: "blocked", style: "margin-left:6px" }) : null,
+            b.spam ? el("span", { class: "tag yellow", text: fmtNum(b.spam) + " spam", style: "margin-left:6px" }) : null,
+          ]),
+          value: Number(b.sends),
+        })), { total: rangeSends, empty: "No send* calls in this range." });
+        hbars($("#spam-reasons"), a.spamReasons.map((r) => ({ name: r.reason, value: r.n })), { total: 0, empty: "No spam detected in this range." });
+        hbars($("#spam-countries"), a.spamCountries.map((r) => ({ name: r.country, value: Number(r.n) })), { empty: "No spam detected in this range." });
+        hbars($("#error-methods"), a.errorMethods.map((r) => ({ name: el("code", { text: r.method }), value: Number(r.n) })), { empty: "No errors logged in this range." });
+        hbars($("#key-usage"), a.keys.filter((k) => k.uses).map((k) => ({ name: k.label, value: Number(k.uses) })), { empty: "No key has been used yet." });
+        renderTable($("#tg-errors"), [
+          { label: "Code", render: (r) => r.error_code ?? "—" },
+          { label: "Description", render: (r) => el("div", { class: "msg", text: r.description || "—" }) },
+          { label: "Count", num: true, render: (r) => fmtNum(r.n) },
+          { label: "Bots", num: true, render: (r) => fmtNum(r.bots) },
+        ], a.telegramErrors, "Telegram rejected nothing in this range.");
+      }
+
+      let resizeTimer;
+      addEventListener("resize", () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+          if (current === "overview") renderCharts();
+          if (dialog.open && openBotId) openBot(openBotId);
+        }, 150);
+      });
+
+      // Keep the overview live while it is on screen.
+      setInterval(() => {
+        if (current === "overview" && !$("#app").hidden && document.visibilityState === "visible" && !dialog.open) load("overview");
+      }, 60000);
 
       let current = "overview";
       async function load(name) {
@@ -455,6 +998,17 @@
         const tab = e.target.closest("button")?.dataset.tab;
         if (tab) load(tab);
       });
+      $("#range").addEventListener("click", (e) => {
+        const days = Number(e.target.closest("button")?.dataset.days);
+        if (!days) return;
+        range = days;
+        try { localStorage.setItem("tgp_range", String(days)); } catch {}
+        load("overview");
+      });
+      $("#ov-refresh").addEventListener("click", () => load("overview"));
+      $("#err-kind").addEventListener("change", () => load("errors"));
+      $("#err-refresh").addEventListener("click", () => load("errors"));
+      $("#err-bot").addEventListener("keydown", (e) => e.key === "Enter" && load("errors"));
       $("#bots-day").addEventListener("change", () => load("bots"));
       $("#bots-refresh").addEventListener("click", () => load("bots"));
       $("#spam-refresh").addEventListener("click", () => load("spam"));

@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS error_log (
   colo        TEXT,             -- Cloudflare edge colo that served the request
   ray         TEXT              -- cf-ray trace id
 );
+CREATE INDEX IF NOT EXISTS error_log_ts ON error_log (ts);
 
 -- ---------------------------------------------------------------------------
 -- Access control (admin dashboard at /admin). Re-run `npm run db:init` to add
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS spam_events (
   country TEXT
 );
 CREATE INDEX IF NOT EXISTS spam_events_bot_ts ON spam_events (bot_id, ts);
+CREATE INDEX IF NOT EXISTS spam_events_ts ON spam_events (ts);
 
 -- Failed admin logins per IP per hour, for brute-force lockout.
 CREATE TABLE IF NOT EXISTS login_failures (
